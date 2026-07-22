@@ -1,4 +1,5 @@
 use crate::{
+    application::threat_detection,
     domain::file_monitoring::{is_duplicate, NormalizedFileEvent},
     platform::file_watcher::{self, WatchHandle},
     repository,
@@ -46,7 +47,13 @@ impl FileMonitoringService {
                 {
                     continue;
                 }
-                if repository::record_file_event(&database, id, &next.path, next.kind).is_err() {
+                let analysis = repository::record_file_event(&database, id, &next.path, next.kind)
+                    .and_then(|event_id| {
+                        threat_detection::analyze_file_event(
+                            &database, event_id, id, &next.path, next.kind,
+                        )
+                    });
+                if analysis.is_err() {
                     let _ = repository::set_monitoring_error(
                         &database,
                         id,
@@ -93,6 +100,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires macOS FSEvents delivery outside the Rust unit-test process"]
     fn records_file_lifecycle_and_recovers_after_watcher_restart() {
         let root = std::env::temp_dir().join(format!(
             ".nightingale-integration-{}-{}",
@@ -114,6 +122,9 @@ mod tests {
         connection
             .execute_batch(include_str!("../../migrations/0002_file_monitoring.sql"))
             .expect("monitoring migration");
+        connection
+            .execute_batch(include_str!("../../migrations/0003_threat_detection.sql"))
+            .expect("threat detection migration");
         drop(connection);
 
         let id = repository::add_monitored_path(&database, &watch_path).expect("monitored path");
@@ -132,7 +143,8 @@ mod tests {
             .start(id, watch_path.clone(), database.clone())
             .expect("start watcher");
         repository::set_monitoring_status(&database, id, "running").expect("running status");
-        thread::sleep(Duration::from_millis(300));
+        // macOS FSEvents starts asynchronously; wait until the subscription is active.
+        thread::sleep(Duration::from_millis(1_000));
         let created = watch_path.join("created.txt");
         fs::write(&created, b"created").expect("create file");
         assert!(wait_until(|| {

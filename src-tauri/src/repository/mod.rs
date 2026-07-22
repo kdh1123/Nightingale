@@ -1,4 +1,7 @@
-use crate::domain::file_monitoring::{sha256_file, FileEventKind};
+use crate::domain::{
+    file_monitoring::{sha256_file, FileEventKind},
+    threat_detection::{Severity, ThreatAssessment, CORRELATION_WINDOW_SECONDS},
+};
 use rusqlite::{params, Connection, ErrorCode};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -37,6 +40,9 @@ impl Database {
                 connection
                     .execute_batch(include_str!("../../migrations/0002_file_monitoring.sql"))?;
             }
+        }
+        if current_version < 3 {
+            connection.execute_batch(include_str!("../../migrations/0003_threat_detection.sql"))?;
         }
         Ok(Self {
             _connection: connection,
@@ -83,6 +89,27 @@ pub struct SecurityEvent {
     pub description: String,
     pub occurred_at: String,
     pub reviewed: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Incident {
+    pub id: i64,
+    pub severity: String,
+    pub status: String,
+    pub title: String,
+    pub description: String,
+    pub event_count: i64,
+    pub first_detected_at: String,
+    pub last_detected_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityScore {
+    pub score: i64,
+    pub open_incident_count: i64,
+    pub critical_incident_count: i64,
 }
 
 /// A short-lived repository-owned connection used by one baseline scan.
@@ -132,11 +159,8 @@ pub fn record_file_event(
         FileEventKind::MetadataChanged => "metadata_changed",
         FileEventKind::Unknown => "unknown",
     };
-    let (event_type, severity, title, description) =
-        integrity_event_details(&connection, monitored_path_id, path, kind);
-    connection.execute("INSERT INTO file_events (monitored_path_id, event_kind, file_path, severity) VALUES (?1, ?2, ?3, ?4)", params![monitored_path_id, event_kind, path.to_string_lossy(), severity]).map_err(|error| error.to_string())?;
+    connection.execute("INSERT INTO file_events (monitored_path_id, event_kind, file_path, severity) VALUES (?1, ?2, ?3, 'info')", params![monitored_path_id, event_kind, path.to_string_lossy()]).map_err(|error| error.to_string())?;
     let id = connection.last_insert_rowid();
-    connection.execute("INSERT INTO security_events (file_event_id, event_type, severity, title, description) VALUES (?1, ?2, ?3, ?4, ?5)", params![id, event_type, severity, title, description]).map_err(|error| error.to_string())?;
     connection.execute(
         "UPDATE monitored_paths SET last_event_at = CURRENT_TIMESTAMP, last_error = NULL WHERE id = ?1",
         params![monitored_path_id],
@@ -144,42 +168,68 @@ pub fn record_file_event(
     Ok(id)
 }
 
-fn integrity_event_details(
-    connection: &Connection,
+pub fn file_differs_from_baseline(
+    database_path: &std::path::Path,
     monitored_path_id: i64,
     path: &std::path::Path,
     kind: FileEventKind,
-) -> (&'static str, &'static str, &'static str, &'static str) {
-    let expected_hash = connection
-        .query_row(
-            "SELECT sha256 FROM file_integrity_baselines WHERE monitored_path_id = ?1 AND file_path = ?2",
-            params![monitored_path_id, path.to_string_lossy()],
-            |row| row.get::<_, String>(0),
-        )
-        .ok();
-    let differs_from_baseline = match kind {
+) -> Result<bool, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let expected_hash = connection.query_row("SELECT sha256 FROM file_integrity_baselines WHERE monitored_path_id = ?1 AND file_path = ?2", params![monitored_path_id, path.to_string_lossy()], |row| row.get::<_, String>(0)).ok();
+    Ok(match kind {
         FileEventKind::Deleted => expected_hash.is_some(),
         FileEventKind::Created => expected_hash.is_none(),
         FileEventKind::Modified => expected_hash
             .is_some_and(|expected| sha256_file(path).is_ok_and(|actual| actual != expected)),
         _ => false,
-    };
-    if differs_from_baseline {
-        (
-            "integrity_changed",
-            "medium",
-            "무결성 기준선과 다른 파일 활동",
-            "선택한 감시 폴더에서 기준선과 다른 파일 생성·변경·삭제가 감지되었습니다.",
-        )
-    } else {
-        (
-            "file_activity",
-            "informational",
-            "파일 활동 감지",
-            "선택한 감시 폴더에서 파일 활동이 감지되었습니다.",
-        )
-    }
+    })
 }
+
+pub fn recent_file_event_count(
+    database_path: &std::path::Path,
+    monitored_path_id: i64,
+) -> Result<i64, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    connection.query_row("SELECT count(*) FROM file_events WHERE monitored_path_id = ?1 AND occurred_at >= datetime('now', '-60 seconds')", params![monitored_path_id], |row| row.get(0)).map_err(|error| error.to_string())
+}
+
+pub fn persist_threat_assessment(
+    database_path: &std::path::Path,
+    file_event_id: i64,
+    assessment: &ThreatAssessment,
+) -> Result<(), String> {
+    let mut connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute(
+            "UPDATE file_events SET severity = ?1 WHERE id = ?2",
+            params![assessment.severity.as_str(), file_event_id],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.execute("INSERT INTO security_events (file_event_id, event_type, severity, title, description) VALUES (?1, ?2, ?3, ?4, ?5)", params![file_event_id, assessment.event_type, assessment.severity.as_str(), assessment.title, assessment.description]).map_err(|error| error.to_string())?;
+    let security_event_id = transaction.last_insert_rowid();
+    let incident_id = transaction.query_row(
+        "SELECT id FROM incidents WHERE correlation_key = ?1 AND status != 'resolved' AND last_detected_at >= datetime('now', ?2) ORDER BY last_detected_at DESC LIMIT 1",
+        params![assessment.correlation_key, format!("-{} seconds", CORRELATION_WINDOW_SECONDS)], |row| row.get::<_, i64>(0)
+    ).ok();
+    let incident_id = if let Some(id) = incident_id {
+        transaction.execute("UPDATE incidents SET severity = CASE WHEN severity IN ('info','low','medium') AND ?1 IN ('high','critical') THEN ?1 ELSE severity END, event_count = event_count + 1, last_detected_at = CURRENT_TIMESTAMP WHERE id = ?2", params![assessment.severity.as_str(), id]).map_err(|error| error.to_string())?;
+        id
+    } else {
+        transaction.execute("INSERT INTO incidents (correlation_key, severity, title, description) VALUES (?1, ?2, ?3, ?4)", params![assessment.correlation_key, assessment.severity.as_str(), assessment.title, assessment.description]).map_err(|error| error.to_string())?;
+        transaction.last_insert_rowid()
+    };
+    transaction
+        .execute(
+            "INSERT INTO incident_events (incident_id, security_event_id) VALUES (?1, ?2)",
+            params![incident_id, security_event_id],
+        )
+        .map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
 pub fn app_database_path(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -347,6 +397,73 @@ pub fn mark_security_event_reviewed(
     Ok(())
 }
 
+pub fn list_incidents(
+    database_path: &std::path::Path,
+    severity: Option<&str>,
+    status: Option<&str>,
+) -> Result<Vec<Incident>, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare("SELECT id, severity, status, title, description, event_count, first_detected_at, last_detected_at FROM incidents WHERE (?1 IS NULL OR severity = ?1) AND (?2 IS NULL OR status = ?2) ORDER BY last_detected_at DESC LIMIT 100").map_err(|error| error.to_string())?;
+    let incidents = statement
+        .query_map(params![severity, status], |row| {
+            Ok(Incident {
+                id: row.get(0)?,
+                severity: row.get(1)?,
+                status: row.get(2)?,
+                title: row.get(3)?,
+                description: row.get(4)?,
+                event_count: row.get(5)?,
+                first_detected_at: row.get(6)?,
+                last_detected_at: row.get(7)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(incidents)
+}
+
+pub fn update_incident_status(
+    database_path: &std::path::Path,
+    id: i64,
+    status: &str,
+) -> Result<(), String> {
+    if !["open", "investigating", "resolved"].contains(&status) {
+        return Err("지원하지 않는 Incident 상태입니다.".to_string());
+    }
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    connection.execute("UPDATE incidents SET status = ?1, resolved_at = CASE WHEN ?1 = 'resolved' THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id = ?2", params![status, id]).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub fn security_score(database_path: &std::path::Path) -> Result<SecurityScore, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare("SELECT severity FROM incidents WHERE status != 'resolved' AND last_detected_at >= datetime('now', '-7 days')").map_err(|error| error.to_string())?;
+    let severities = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let penalty: i64 = severities
+        .iter()
+        .map(|value| match value.as_str() {
+            "low" => Severity::Low.score_penalty(),
+            "medium" => Severity::Medium.score_penalty(),
+            "high" => Severity::High.score_penalty(),
+            "critical" => Severity::Critical.score_penalty(),
+            _ => Severity::Info.score_penalty(),
+        })
+        .sum();
+    Ok(SecurityScore {
+        score: (100 - penalty).max(0),
+        open_incident_count: severities.len() as i64,
+        critical_incident_count: severities
+            .iter()
+            .filter(|value| value.as_str() == "critical")
+            .count() as i64,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,26 +488,38 @@ mod tests {
         std::fs::remove_file(path).expect("cleanup");
     }
     #[test]
-    fn raises_severity_when_a_baselined_file_changes() {
-        let connection = Connection::open_in_memory().expect("in-memory database");
-        connection
-            .execute_batch(include_str!("../../migrations/0001_initial.sql"))
-            .expect("base migration");
-        connection
-            .execute_batch(include_str!("../../migrations/0002_file_monitoring.sql"))
-            .expect("monitoring migration");
-        connection
-            .execute("INSERT INTO monitored_paths (path, normalized_path) VALUES ('/tmp/watch', '/tmp/watch')", [])
+    fn correlates_events_and_calculates_security_score() {
+        let path = std::env::temp_dir().join(format!(
+            "nightingale-threat-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .elapsed()
+                .map_or(0, |duration| duration.as_nanos())
+        ));
+        Database::open(path.clone()).expect("database");
+        let monitored = add_monitored_path(&path, std::path::Path::new("/tmp/nightingale-threat"))
             .expect("monitored path");
-        let file =
-            std::env::temp_dir().join(format!("nightingale-baseline-{}.txt", std::process::id()));
-        std::fs::write(&file, b"before").expect("fixture");
-        let hash = sha256_file(&file).expect("initial hash");
-        connection.execute("INSERT INTO file_integrity_baselines (monitored_path_id, file_path, file_size, modified_at, sha256) VALUES (1, ?1, 6, 0, ?2)", params![file.to_string_lossy(), hash]).expect("baseline");
-        std::fs::write(&file, b"after").expect("modified fixture");
-        let (_, severity, _, _) =
-            integrity_event_details(&connection, 1, &file, FileEventKind::Modified);
-        assert_eq!(severity, "medium");
-        std::fs::remove_file(file).expect("cleanup");
+        let assessment = ThreatAssessment {
+            event_type: "mass_file_change",
+            severity: Severity::High,
+            title: "대량 파일 변경 감지",
+            description: "test",
+            correlation_key: "mass_file_change:/tmp".to_string(),
+        };
+        for _ in 0..2 {
+            let event = record_file_event(
+                &path,
+                monitored,
+                std::path::Path::new("/tmp/nightingale-threat/a.txt"),
+                FileEventKind::Modified,
+            )
+            .expect("file event");
+            persist_threat_assessment(&path, event, &assessment).expect("assessment");
+        }
+        let incidents = list_incidents(&path, Some("high"), Some("open")).expect("incidents");
+        assert_eq!(incidents.len(), 1);
+        assert_eq!(incidents[0].event_count, 2);
+        assert_eq!(security_score(&path).expect("score").score, 75);
+        std::fs::remove_file(path).expect("cleanup");
     }
 }

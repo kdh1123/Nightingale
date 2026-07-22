@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { StatePanel } from "../../shared/components/StatePanel";
 import { getAppStatus } from "../../shared/lib/tauri";
+import { getSecurityScore } from "../security-events/api";
 
 export function DashboardPage() {
   const status = useQuery({ queryKey: ["app-status"], queryFn: getAppStatus, retry: false });
+  const score = useQuery({ queryKey: ["security-score"], queryFn: getSecurityScore, retry: false });
   if (status.isPending)
     return (
       <StatePanel title="Nightingale 준비 중">안전한 상태 정보를 확인하고 있습니다.</StatePanel>
@@ -22,6 +24,11 @@ export function DashboardPage() {
         모니터링 기능은 아직 준비 중입니다. 이 화면은 앱과 플랫폼 준비 상태를 안전하게 확인합니다.
       </p>
       <div className="status-grid">
+        <article>
+          <span>Security Score</span>
+          <strong>{score.data ? `${score.data.score} / 100` : "계산 중"}</strong>
+          {score.data ? <p>열린 Incident {score.data.openIncidentCount}건</p> : null}
+        </article>
         <article>
           <span>운영체제</span>
           <strong>{status.data.operatingSystem}</strong>

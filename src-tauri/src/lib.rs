@@ -50,7 +50,10 @@ pub fn run() {
             tauri_api::pause_file_monitoring,
             tauri_api::resume_file_monitoring,
             tauri_api::list_security_events,
-            tauri_api::mark_security_event_reviewed
+            tauri_api::mark_security_event_reviewed,
+            tauri_api::list_incidents,
+            tauri_api::update_incident_status,
+            tauri_api::get_security_score
         ])
         .run(tauri::generate_context!())
         .expect("Nightingale failed to run");

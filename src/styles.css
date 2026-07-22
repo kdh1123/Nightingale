@@ -142,6 +142,17 @@ article strong {
   flex-wrap: wrap;
   gap: 8px;
 }
+.filters {
+  display: flex;
+  gap: 14px;
+  margin: 12px 0;
+}
+.filters label {
+  color: #adbdc8;
+}
+.filters select {
+  margin-left: 6px;
+}
 button {
   cursor: pointer;
 }
