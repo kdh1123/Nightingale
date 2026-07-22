@@ -1,0 +1,14 @@
+ALTER TABLE monitored_paths ADD COLUMN normalized_path TEXT;
+ALTER TABLE monitored_paths ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE monitored_paths ADD COLUMN monitoring_status TEXT NOT NULL DEFAULT 'stopped';
+ALTER TABLE monitored_paths ADD COLUMN baseline_status TEXT NOT NULL DEFAULT 'not_started';
+ALTER TABLE monitored_paths ADD COLUMN last_scan_at TEXT;
+ALTER TABLE monitored_paths ADD COLUMN last_event_at TEXT;
+ALTER TABLE monitored_paths ADD COLUMN last_error TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_monitored_paths_normalized ON monitored_paths(normalized_path);
+CREATE TABLE IF NOT EXISTS file_integrity_baselines (id INTEGER PRIMARY KEY, monitored_path_id INTEGER NOT NULL REFERENCES monitored_paths(id) ON DELETE CASCADE, file_path TEXT NOT NULL, file_size INTEGER NOT NULL, modified_at INTEGER NOT NULL, sha256 TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(monitored_path_id, file_path));
+CREATE TABLE IF NOT EXISTS file_events (id INTEGER PRIMARY KEY, monitored_path_id INTEGER NOT NULL REFERENCES monitored_paths(id) ON DELETE CASCADE, event_kind TEXT NOT NULL, file_path TEXT NOT NULL, previous_path TEXT, severity TEXT NOT NULL, occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, reviewed INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_file_events_latest ON file_events(monitored_path_id, occurred_at DESC);
+CREATE TABLE IF NOT EXISTS security_events (id INTEGER PRIMARY KEY, file_event_id INTEGER REFERENCES file_events(id) ON DELETE SET NULL, event_type TEXT NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, reviewed INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_security_events_latest ON security_events(occurred_at DESC, reviewed);
+INSERT OR IGNORE INTO schema_metadata (version) VALUES (2);

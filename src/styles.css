@@ -122,6 +122,32 @@ article strong {
 .state-panel {
   max-width: 580px;
 }
+.monitoring-item,
+.event-list li {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid #293945;
+  border-radius: 10px;
+  list-style: none;
+}
+.monitoring-item span,
+.event-list span {
+  color: #adbdc8;
+  font-size: 13px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: wait;
+}
 @media (max-width: 700px) {
   .app-shell {
     grid-template-columns: 1fr;

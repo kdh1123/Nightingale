@@ -1,4 +1,5 @@
 use serde::Serialize;
+pub mod file_watcher;
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -3,4 +3,8 @@ dist/
 src-tauri/target/
 src-tauri/gen/
 *.db
+*.sqlite
+*.sqlite3
+*.log
+.nightingale-integration-*/
 .DS_Store

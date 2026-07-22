@@ -15,5 +15,7 @@ pub fn app_status() -> AppStatus {
         capabilities: capabilities(),
     }
 }
+pub mod baseline;
 pub mod error;
+pub mod file_monitoring;
 pub mod monitoring;
