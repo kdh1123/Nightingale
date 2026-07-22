@@ -16,3 +16,4 @@ pub fn app_status() -> AppStatus {
     }
 }
 pub mod error;
+pub mod monitoring;
