@@ -1,5 +1,6 @@
 use crate::domain::{
     file_monitoring::{sha256_file, FileEventKind},
+    security_management::ApplicationSettings,
     threat_detection::{Severity, ThreatAssessment, CORRELATION_WINDOW_SECONDS},
 };
 use rusqlite::{params, Connection, ErrorCode};
@@ -44,6 +45,11 @@ impl Database {
         if current_version < 3 {
             connection.execute_batch(include_str!("../../migrations/0003_threat_detection.sql"))?;
         }
+        if current_version < 4 {
+            connection.execute_batch(include_str!(
+                "../../migrations/0004_security_management.sql"
+            ))?;
+        }
         Ok(Self {
             _connection: connection,
         })
@@ -79,7 +85,7 @@ pub struct FileEvent {
     pub occurred_at: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecurityEvent {
     pub id: i64,
@@ -110,6 +116,41 @@ pub struct SecurityScore {
     pub score: i64,
     pub open_incident_count: i64,
     pub critical_incident_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Notification {
+    pub id: i64,
+    pub incident_id: Option<i64>,
+    pub severity: String,
+    pub title: String,
+    pub message: String,
+    pub read: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecurityReport {
+    pub generated_at: String,
+    pub security_score: SecurityScore,
+    pub total_incidents: i64,
+    pub severity_counts: SeverityCounts,
+    pub monitored_folder_count: i64,
+    pub file_event_count: i64,
+    pub recent_detections: Vec<SecurityEvent>,
+    pub recent_risk_events: Vec<SecurityEvent>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeverityCounts {
+    pub info: i64,
+    pub low: i64,
+    pub medium: i64,
+    pub high: i64,
+    pub critical: i64,
 }
 
 /// A short-lived repository-owned connection used by one baseline scan.
@@ -227,6 +268,9 @@ pub fn persist_threat_assessment(
             params![incident_id, security_event_id],
         )
         .map_err(|error| error.to_string())?;
+    if assessment.severity != Severity::Info {
+        transaction.execute("INSERT INTO notifications (incident_id, severity, title, message) VALUES (?1, ?2, ?3, ?4)", params![incident_id, assessment.severity.as_str(), assessment.title, assessment.description]).map_err(|error| error.to_string())?;
+    }
     transaction.commit().map_err(|error| error.to_string())
 }
 
@@ -462,6 +506,151 @@ pub fn security_score(database_path: &std::path::Path) -> Result<SecurityScore, 
             .filter(|value| value.as_str() == "critical")
             .count() as i64,
     })
+}
+
+pub fn application_settings(
+    database_path: &std::path::Path,
+) -> Result<ApplicationSettings, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    connection.query_row("SELECT monitoring_enabled, threat_detection_enabled, auto_baseline_refresh, security_score_enabled, log_retention_days, ui_theme FROM application_settings WHERE id = 1", [], |row| Ok(ApplicationSettings { monitoring_enabled: row.get::<_, i64>(0)? != 0, threat_detection_enabled: row.get::<_, i64>(1)? != 0, auto_baseline_refresh: row.get::<_, i64>(2)? != 0, security_score_enabled: row.get::<_, i64>(3)? != 0, log_retention_days: row.get(4)?, ui_theme: row.get(5)? })).map_err(|error| error.to_string())
+}
+
+pub fn save_application_settings(
+    database_path: &std::path::Path,
+    settings: &ApplicationSettings,
+) -> Result<(), String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    connection.execute("INSERT INTO application_settings (id, monitoring_enabled, threat_detection_enabled, auto_baseline_refresh, security_score_enabled, log_retention_days, ui_theme, updated_at) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET monitoring_enabled=excluded.monitoring_enabled, threat_detection_enabled=excluded.threat_detection_enabled, auto_baseline_refresh=excluded.auto_baseline_refresh, security_score_enabled=excluded.security_score_enabled, log_retention_days=excluded.log_retention_days, ui_theme=excluded.ui_theme, updated_at=CURRENT_TIMESTAMP", params![settings.monitoring_enabled, settings.threat_detection_enabled, settings.auto_baseline_refresh, settings.security_score_enabled, settings.log_retention_days, settings.ui_theme]).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub fn list_notifications(database_path: &std::path::Path) -> Result<Vec<Notification>, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare("SELECT id, incident_id, severity, title, message, read, created_at FROM notifications ORDER BY created_at DESC LIMIT 100").map_err(|error| error.to_string())?;
+    let notifications = statement
+        .query_map([], |row| {
+            Ok(Notification {
+                id: row.get(0)?,
+                incident_id: row.get(1)?,
+                severity: row.get(2)?,
+                title: row.get(3)?,
+                message: row.get(4)?,
+                read: row.get::<_, i64>(5)? != 0,
+                created_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(notifications)
+}
+
+pub fn mark_notification_read(database_path: &std::path::Path, id: i64) -> Result<(), String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "UPDATE notifications SET read = 1 WHERE id = ?1",
+            params![id],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub fn list_file_events_filtered(
+    database_path: &std::path::Path,
+    query: Option<&str>,
+    severity: Option<&str>,
+    from: Option<&str>,
+    to: Option<&str>,
+    sort_desc: bool,
+) -> Result<Vec<FileEvent>, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let order = if sort_desc { "DESC" } else { "ASC" };
+    let sql = format!("SELECT id, event_kind, file_path, severity, occurred_at FROM file_events WHERE (?1 IS NULL OR file_path LIKE '%' || ?1 || '%') AND (?2 IS NULL OR severity = ?2) AND (?3 IS NULL OR occurred_at >= ?3) AND (?4 IS NULL OR occurred_at <= ?4) ORDER BY occurred_at {order} LIMIT 500");
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| error.to_string())?;
+    let events = statement
+        .query_map(params![query, severity, from, to], |row| {
+            Ok(FileEvent {
+                id: row.get(0)?,
+                event_kind: row.get(1)?,
+                file_path: row.get(2)?,
+                severity: row.get(3)?,
+                occurred_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(events)
+}
+
+pub fn cleanup_logs(database_path: &std::path::Path, retention_days: i64) -> Result<usize, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let age = format!("-{} days", retention_days);
+    let deleted = connection
+        .execute(
+            "DELETE FROM notifications WHERE created_at < datetime('now', ?1)",
+            params![age],
+        )
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "DELETE FROM security_events WHERE occurred_at < datetime('now', ?1)",
+            params![age],
+        )
+        .map_err(|error| error.to_string())?;
+    connection
+        .execute(
+            "DELETE FROM file_events WHERE occurred_at < datetime('now', ?1)",
+            params![age],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(deleted)
+}
+
+pub fn security_report(database_path: &std::path::Path) -> Result<SecurityReport, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let count = |sql: &str| {
+        connection
+            .query_row(sql, [], |row| row.get::<_, i64>(0))
+            .map_err(|error| error.to_string())
+    };
+    let severity_counts = SeverityCounts {
+        info: count("SELECT count(*) FROM security_events WHERE severity = 'info'")?,
+        low: count("SELECT count(*) FROM security_events WHERE severity = 'low'")?,
+        medium: count("SELECT count(*) FROM security_events WHERE severity = 'medium'")?,
+        high: count("SELECT count(*) FROM security_events WHERE severity = 'high'")?,
+        critical: count("SELECT count(*) FROM security_events WHERE severity = 'critical'")?,
+    };
+    let recent_detections = list_security_events(database_path)?;
+    let recent_risk_events = recent_detections
+        .iter()
+        .filter(|event| ["medium", "high", "critical"].contains(&event.severity.as_str()))
+        .take(10)
+        .cloned()
+        .collect();
+    let generated_at = connection
+        .query_row("SELECT CURRENT_TIMESTAMP", [], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    let report = SecurityReport {
+        generated_at,
+        security_score: security_score(database_path)?,
+        total_incidents: count("SELECT count(*) FROM incidents")?,
+        severity_counts,
+        monitored_folder_count: count("SELECT count(*) FROM monitored_paths WHERE enabled = 1")?,
+        file_event_count: count("SELECT count(*) FROM file_events")?,
+        recent_detections,
+        recent_risk_events,
+    };
+    connection
+        .execute(
+            "INSERT INTO report_history (report_json) VALUES (?1)",
+            params![serde_json::to_string(&report).map_err(|error| error.to_string())?],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(report)
 }
 
 #[cfg(test)]

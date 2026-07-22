@@ -26,14 +26,21 @@ pub fn run() {
             let _database = Database::open_for_app(app.handle())?;
             let database_path =
                 repository::app_database_path(app.handle()).map_err(std::io::Error::other)?;
+            // Apply the persisted retention policy on every application launch.
+            let _ = application::security_management::cleanup_logs(&database_path);
             let monitoring = app.state::<FileMonitoringService>();
-            for path in repository::enabled_monitored_paths(&database_path)
+            if repository::application_settings(&database_path)
                 .map_err(std::io::Error::other)?
+                .monitoring_enabled
             {
-                if let Err(error) =
-                    monitoring.start(path.id, path.path.into(), database_path.clone())
+                for path in repository::enabled_monitored_paths(&database_path)
+                    .map_err(std::io::Error::other)?
                 {
-                    let _ = repository::set_monitoring_error(&database_path, path.id, &error);
+                    if let Err(error) =
+                        monitoring.start(path.id, path.path.into(), database_path.clone())
+                    {
+                        let _ = repository::set_monitoring_error(&database_path, path.id, &error);
+                    }
                 }
             }
             Ok(())
@@ -53,7 +60,14 @@ pub fn run() {
             tauri_api::mark_security_event_reviewed,
             tauri_api::list_incidents,
             tauri_api::update_incident_status,
-            tauri_api::get_security_score
+            tauri_api::get_security_score,
+            tauri_api::get_application_settings,
+            tauri_api::update_application_settings,
+            tauri_api::list_notifications,
+            tauri_api::mark_notification_read,
+            tauri_api::get_security_report,
+            tauri_api::list_file_events_filtered,
+            tauri_api::cleanup_security_logs
         ])
         .run(tauri::generate_context!())
         .expect("Nightingale failed to run");

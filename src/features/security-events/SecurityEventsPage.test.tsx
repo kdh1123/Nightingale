@@ -33,6 +33,7 @@ vi.mock("./api", () => ({
     ]),
   ),
   updateIncidentStatus: vi.fn(),
+  listFileEventsFiltered: vi.fn(() => Promise.resolve([])),
 }));
 
 describe("SecurityEventsPage", () => {

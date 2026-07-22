@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { listIncidents, listSecurityEvents, markSecurityEventReviewed, updateIncidentStatus } from "./api";
+import { listFileEventsFiltered, listIncidents, listSecurityEvents, markSecurityEventReviewed, updateIncidentStatus } from "./api";
 
 export function SecurityEventsPage() {
   const queryClient = useQueryClient();
@@ -8,6 +8,11 @@ export function SecurityEventsPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [severity, setSeverity] = useState("");
   const [incidentStatus, setIncidentStatus] = useState("");
+  const [logQuery, setLogQuery] = useState("");
+  const [logSeverity, setLogSeverity] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [sortDesc, setSortDesc] = useState(true);
   const events = useQuery({
     queryKey: ["security-events"],
     queryFn: listSecurityEvents,
@@ -18,6 +23,7 @@ export function SecurityEventsPage() {
     queryFn: () => listIncidents(severity, incidentStatus),
     refetchInterval: 2000,
   });
+  const fileEvents = useQuery({ queryKey: ["file-events", logQuery, logSeverity, from, to, sortDesc], queryFn: () => listFileEventsFiltered({ query: logQuery, severity: logSeverity, from, to, sortDesc }) });
   const review = async (id: number) => {
     setWorkingId(id);
     try {
@@ -72,6 +78,8 @@ export function SecurityEventsPage() {
       ) : (
         <p>기록된 보안 이벤트가 없습니다.</p>
       )}
+      <h2>파일 이벤트 로그</h2><div className="filters"><label>경로 검색 <input value={logQuery} onChange={(event) => setLogQuery(event.target.value)} /></label><label>Severity <select value={logSeverity} onChange={(event) => setLogSeverity(event.target.value)}><option value="">전체</option><option value="info">info</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label><label>시작일 <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label><label>종료일 <input type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label><button onClick={() => setSortDesc((value) => !value)}>{sortDesc ? "최신순" : "오래된순"}</button></div>
+      {fileEvents.isPending ? <p>로그를 불러오는 중입니다.</p> : fileEvents.data?.length ? <ul className="event-list">{fileEvents.data.map((event) => <li key={event.id}><strong>{event.eventKind}</strong><span>{event.filePath}</span><span>{event.severity} · {event.occurredAt}</span></li>)}</ul> : <p>조건에 맞는 파일 이벤트가 없습니다.</p>}
     </section>
   );
 }

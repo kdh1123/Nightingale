@@ -2,10 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { StatePanel } from "../../shared/components/StatePanel";
 import { getAppStatus } from "../../shared/lib/tauri";
 import { getSecurityScore } from "../security-events/api";
+import { getSecurityReport } from "../security-management/api";
 
 export function DashboardPage() {
   const status = useQuery({ queryKey: ["app-status"], queryFn: getAppStatus, retry: false });
   const score = useQuery({ queryKey: ["security-score"], queryFn: getSecurityScore, retry: false });
+  const report = useQuery({ queryKey: ["security-report"], queryFn: getSecurityReport, retry: false });
   if (status.isPending)
     return (
       <StatePanel title="Nightingale 준비 중">안전한 상태 정보를 확인하고 있습니다.</StatePanel>
@@ -18,12 +20,17 @@ export function DashboardPage() {
     );
   return (
     <section>
-      <p className="eyebrow">PHASE 0 · 기반 준비</p>
+      <p className="eyebrow">PHASE 4 · Security Management Platform</p>
       <h1>보안 상태</h1>
       <p>
         모니터링 기능은 아직 준비 중입니다. 이 화면은 앱과 플랫폼 준비 상태를 안전하게 확인합니다.
       </p>
       <div className="status-grid">
+        <article>
+          <span>Active Incident</span>
+          <strong>{score.data?.openIncidentCount ?? "—"}</strong>
+          <p>해결되지 않은 보안 Incident</p>
+        </article>
         <article>
           <span>Security Score</span>
           <strong>{score.data ? `${score.data.score} / 100` : "계산 중"}</strong>
@@ -38,6 +45,7 @@ export function DashboardPage() {
           <strong>{status.data.appVersion}</strong>
         </article>
       </div>
+      {report.data ? <><h2>최근 탐지 및 Severity 분포</h2><div className="severity-row">{Object.entries(report.data.severityCounts).map(([severity, count]) => <span key={severity} className={`severity ${severity}`}>{severity}: {count}</span>)}</div>{report.data.recentRiskEvents.length ? <ul className="event-list">{report.data.recentRiskEvents.slice(0, 5).map((event) => <li key={event.id}><strong>{event.title}</strong><span>{event.severity} · {event.occurredAt}</span></li>)}</ul> : <p>최근 위험 이벤트가 없습니다.</p>}</> : null}
       <h2>기능 준비 상태</h2>
       <ul className="capabilities">
         {status.data.capabilities.map((item) => (

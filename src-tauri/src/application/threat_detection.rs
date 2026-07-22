@@ -14,6 +14,9 @@ pub fn analyze_file_event(
     path: &Path,
     kind: FileEventKind,
 ) -> Result<(), String> {
+    if !repository::application_settings(database_path)?.threat_detection_enabled {
+        return Ok(());
+    }
     let differs_from_baseline =
         repository::file_differs_from_baseline(database_path, monitored_path_id, path, kind)?;
     let recent_changes = repository::recent_file_event_count(database_path, monitored_path_id)?;

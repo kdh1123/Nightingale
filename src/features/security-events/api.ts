@@ -24,6 +24,7 @@ export interface SecurityScore {
   openIncidentCount: number;
   criticalIncidentCount: number;
 }
+export interface FileEvent { id: number; eventKind: string; filePath: string; severity: string; occurredAt: string; }
 
 export const listSecurityEvents = () => invoke<SecurityEvent[]>("list_security_events");
 export const markSecurityEventReviewed = (id: number) =>
@@ -33,3 +34,4 @@ export const listIncidents = (severity?: string, status?: string) =>
 export const updateIncidentStatus = (id: number, status: Incident["status"]) =>
   invoke<void>("update_incident_status", { id, status });
 export const getSecurityScore = () => invoke<SecurityScore>("get_security_score");
+export const listFileEventsFiltered = (filters: { query?: string; severity?: string; from?: string; to?: string; sortDesc?: boolean }) => invoke<FileEvent[]>("list_file_events_filtered", { query: filters.query || null, severity: filters.severity || null, from: filters.from || null, to: filters.to || null, sortDesc: filters.sortDesc ?? true });
