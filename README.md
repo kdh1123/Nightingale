@@ -58,6 +58,16 @@ cd src-tauri && cargo fmt --check && cargo check && cargo clippy --all-targets -
 | `npm run tauri dev`에서 포트 1420 충돌 | 해당 Vite 프로세스를 종료한 뒤 다시 실행                                     |
 | 감시 경로가 중복되었다는 오류          | 기존 목록에서 해당 경로를 삭제하거나 재개                                    |
 
+### 디스크 용량 정리
+
+Rust 빌드 캐시를 삭제하려면 다음 명령을 실행합니다.
+
+```sh
+cargo clean --manifest-path src-tauri/Cargo.toml
+```
+
+다음 실행 시에는 다시 컴파일되므로 첫 빌드는 시간이 조금 더 걸릴 수 있습니다.
+
 개발 중에는 사용자의 실제 파일을 변경하지 않습니다. 파일 감시는 사용자가 명시적으로 추가한 폴더에서만 시작됩니다. 자세한 구조와 보안·플랫폼 제약은 [docs](docs/)를 참고하세요. 기술 선택은 [기술 결정](docs/technology-decisions.md)에 기록했습니다.
 
 ## Phase 2 파일 모니터링 제한
