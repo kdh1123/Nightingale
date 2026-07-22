@@ -1,1 +1,3 @@
-fn main() { nightingale_lib::run(); }
+fn main() {
+    nightingale_lib::run();
+}
