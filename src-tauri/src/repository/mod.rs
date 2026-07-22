@@ -85,6 +85,38 @@ pub struct SecurityEvent {
     pub reviewed: bool,
 }
 
+/// A short-lived repository-owned connection used by one baseline scan.
+/// Keeping it open avoids opening SQLite once per file while preserving the
+/// application → repository boundary.
+pub struct BaselineWriter {
+    connection: Connection,
+}
+
+impl BaselineWriter {
+    pub fn open(database_path: &std::path::Path) -> Result<Self, String> {
+        Ok(Self {
+            connection: open_connection(database_path).map_err(|error| error.to_string())?,
+        })
+    }
+
+    pub fn upsert(
+        &self,
+        monitored_path_id: i64,
+        file_path: &std::path::Path,
+        file_size: u64,
+        modified_at: i64,
+        sha256: &str,
+    ) -> Result<(), String> {
+        self.connection
+            .execute(
+                "INSERT INTO file_integrity_baselines (monitored_path_id, file_path, file_size, modified_at, sha256) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(monitored_path_id, file_path) DO UPDATE SET file_size = excluded.file_size, modified_at = excluded.modified_at, sha256 = excluded.sha256",
+                params![monitored_path_id, file_path.to_string_lossy(), file_size as i64, modified_at, sha256],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+}
+
 pub fn record_file_event(
     database_path: &std::path::Path,
     monitored_path_id: i64,
@@ -243,23 +275,6 @@ pub fn set_baseline_status(
         "UPDATE monitored_paths SET baseline_status = ?1, last_scan_at = CASE WHEN ?1 = 'complete' THEN CURRENT_TIMESTAMP ELSE last_scan_at END, last_error = ?2 WHERE id = ?3",
         params![status, error, id],
     ).map_err(|error| error.to_string())?;
-    Ok(())
-}
-pub fn upsert_file_baseline(
-    database_path: &std::path::Path,
-    monitored_path_id: i64,
-    file_path: &std::path::Path,
-    file_size: u64,
-    modified_at: i64,
-    sha256: &str,
-) -> Result<(), String> {
-    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
-    connection
-        .execute(
-            "INSERT INTO file_integrity_baselines (monitored_path_id, file_path, file_size, modified_at, sha256) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(monitored_path_id, file_path) DO UPDATE SET file_size = excluded.file_size, modified_at = excluded.modified_at, sha256 = excluded.sha256",
-            params![monitored_path_id, file_path.to_string_lossy(), file_size as i64, modified_at, sha256],
-        )
-        .map_err(|error| error.to_string())?;
     Ok(())
 }
 pub fn enabled_monitored_paths(

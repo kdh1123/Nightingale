@@ -5,6 +5,7 @@ import { listSecurityEvents, markSecurityEventReviewed } from "./api";
 export function SecurityEventsPage() {
   const queryClient = useQueryClient();
   const [workingId, setWorkingId] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const events = useQuery({
     queryKey: ["security-events"],
     queryFn: listSecurityEvents,
@@ -13,8 +14,13 @@ export function SecurityEventsPage() {
   const review = async (id: number) => {
     setWorkingId(id);
     try {
+      setActionError(null);
       await markSecurityEventReviewed(id);
       await queryClient.invalidateQueries({ queryKey: ["security-events"] });
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "이벤트를 검토 완료로 표시할 수 없습니다.",
+      );
     } finally {
       setWorkingId(null);
     }
@@ -25,6 +31,7 @@ export function SecurityEventsPage() {
     <section>
       <p className="eyebrow">파일 모니터링 알림</p>
       <h1>보안 이벤트</h1>
+      {actionError ? <p role="alert">{actionError}</p> : null}
       {events.data?.length ? (
         <ul className="event-list">
           {events.data.map((event) => (

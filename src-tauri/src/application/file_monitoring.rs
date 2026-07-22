@@ -46,7 +46,14 @@ impl FileMonitoringService {
                 {
                     continue;
                 }
-                let _ = repository::record_file_event(&database, id, &next.path, next.kind);
+                if repository::record_file_event(&database, id, &next.path, next.kind).is_err() {
+                    let _ = repository::set_monitoring_error(
+                        &database,
+                        id,
+                        "파일 이벤트를 기록하지 못했습니다.",
+                    );
+                    tracing::warn!(watch_id = id, "file monitoring event could not be recorded");
+                }
                 previous = Some(next);
             }
         });

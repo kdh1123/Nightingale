@@ -20,7 +20,11 @@ export function FileMonitoringPage() {
     queryFn: listFileEvents,
     refetchInterval: 2000,
   });
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["monitored-paths"] });
+  const refresh = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["monitored-paths"] }),
+      queryClient.invalidateQueries({ queryKey: ["file-events"] }),
+    ]);
   const add = async () => {
     if (!path.trim()) return;
     try {
