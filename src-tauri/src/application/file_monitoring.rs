@@ -31,7 +31,9 @@ impl FileMonitoringService {
             .map_err(|_| "watcher state unavailable".to_string())?
             .insert(id, handle);
         thread::spawn(move || {
-            let mut previous: Option<NormalizedFileEvent> = None;
+            // Deduplicate per path rather than only the immediately preceding event.
+            // The bounded time window keeps this map small during long-running monitoring.
+            let mut recent = HashMap::<PathBuf, NormalizedFileEvent>::new();
             while let Ok((event_path, kind)) = receiver.recv() {
                 let next = NormalizedFileEvent {
                     monitored_path: path.clone(),
@@ -41,12 +43,15 @@ impl FileMonitoringService {
                         .duration_since(UNIX_EPOCH)
                         .map_or(0, |time| time.as_millis()),
                 };
-                if previous
-                    .as_ref()
+                if recent
+                    .get(&next.path)
                     .is_some_and(|old| is_duplicate(old, &next))
                 {
                     continue;
                 }
+                recent.retain(|_, event| {
+                    next.observed_at_ms.saturating_sub(event.observed_at_ms) <= 1_000
+                });
                 let analysis = repository::record_file_event(&database, id, &next.path, next.kind)
                     .and_then(|event_id| {
                         threat_detection::analyze_file_event(
@@ -61,7 +66,7 @@ impl FileMonitoringService {
                     );
                     tracing::warn!(watch_id = id, "file monitoring event could not be recorded");
                 }
-                previous = Some(next);
+                recent.insert(next.path.clone(), next);
             }
         });
         Ok(())
@@ -97,6 +102,22 @@ mod tests {
             thread::sleep(Duration::from_millis(100));
         }
         false
+    }
+
+    #[test]
+    fn deduplication_is_scoped_to_each_path() {
+        let first = NormalizedFileEvent {
+            monitored_path: PathBuf::from("/watch"),
+            path: PathBuf::from("/watch/a.txt"),
+            kind: crate::domain::file_monitoring::FileEventKind::Modified,
+            observed_at_ms: 100,
+        };
+        let other_path = NormalizedFileEvent {
+            path: PathBuf::from("/watch/b.txt"),
+            observed_at_ms: 101,
+            ..first.clone()
+        };
+        assert!(!is_duplicate(&first, &other_path));
     }
 
     #[test]

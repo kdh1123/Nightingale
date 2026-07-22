@@ -66,6 +66,7 @@ pub fn run() {
             tauri_api::list_notifications,
             tauri_api::mark_notification_read,
             tauri_api::get_security_report,
+            tauri_api::generate_security_report,
             tauri_api::list_file_events_filtered,
             tauri_api::cleanup_security_logs
         ])

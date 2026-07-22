@@ -1,12 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { StatePanel } from "../../shared/components/StatePanel";
 import { getAppStatus } from "../../shared/lib/tauri";
-import { getSecurityScore } from "../security-events/api";
 import { getSecurityReport } from "../security-management/api";
 
 export function DashboardPage() {
   const status = useQuery({ queryKey: ["app-status"], queryFn: getAppStatus, retry: false });
-  const score = useQuery({ queryKey: ["security-score"], queryFn: getSecurityScore, retry: false });
   const report = useQuery({ queryKey: ["security-report"], queryFn: getSecurityReport, retry: false });
   if (status.isPending)
     return (
@@ -28,13 +26,13 @@ export function DashboardPage() {
       <div className="status-grid">
         <article>
           <span>Active Incident</span>
-          <strong>{score.data?.openIncidentCount ?? "—"}</strong>
+          <strong>{report.data?.securityScore.openIncidentCount ?? "—"}</strong>
           <p>해결되지 않은 보안 Incident</p>
         </article>
         <article>
           <span>Security Score</span>
-          <strong>{score.data ? `${score.data.score} / 100` : "계산 중"}</strong>
-          {score.data ? <p>열린 Incident {score.data.openIncidentCount}건</p> : null}
+          <strong>{report.data ? `${report.data.securityScore.score} / 100` : "계산 중"}</strong>
+          {report.data ? <p>열린 Incident {report.data.securityScore.openIncidentCount}건</p> : null}
         </article>
         <article>
           <span>운영체제</span>

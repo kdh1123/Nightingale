@@ -50,6 +50,9 @@ impl Database {
                 "../../migrations/0004_security_management.sql"
             ))?;
         }
+        if current_version < 5 {
+            connection.execute_batch(include_str!("../../migrations/0005_performance.sql"))?;
+        }
         Ok(Self {
             _connection: connection,
         })
@@ -58,7 +61,7 @@ impl Database {
 
 fn open_connection(path: &std::path::Path) -> Result<Connection, rusqlite::Error> {
     let connection = Connection::open(path)?;
-    connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+    connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL;")?;
     Ok(connection)
 }
 
@@ -153,6 +156,13 @@ pub struct SeverityCounts {
     pub critical: i64,
 }
 
+/// Values needed by the detector, loaded through one read connection per event.
+pub struct FileEventAnalysisContext {
+    pub threat_detection_enabled: bool,
+    pub differs_from_baseline: bool,
+    pub recent_changes: i64,
+}
+
 /// A short-lived repository-owned connection used by one baseline scan.
 /// Keeping it open avoids opening SQLite once per file while preserving the
 /// application → repository boundary.
@@ -209,29 +219,35 @@ pub fn record_file_event(
     Ok(id)
 }
 
-pub fn file_differs_from_baseline(
+pub fn file_event_analysis_context(
     database_path: &std::path::Path,
     monitored_path_id: i64,
     path: &std::path::Path,
     kind: FileEventKind,
-) -> Result<bool, String> {
+) -> Result<FileEventAnalysisContext, String> {
     let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let threat_detection_enabled = connection
+        .query_row(
+            "SELECT threat_detection_enabled FROM application_settings WHERE id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?
+        != 0;
     let expected_hash = connection.query_row("SELECT sha256 FROM file_integrity_baselines WHERE monitored_path_id = ?1 AND file_path = ?2", params![monitored_path_id, path.to_string_lossy()], |row| row.get::<_, String>(0)).ok();
-    Ok(match kind {
+    let differs_from_baseline = match kind {
         FileEventKind::Deleted => expected_hash.is_some(),
         FileEventKind::Created => expected_hash.is_none(),
         FileEventKind::Modified => expected_hash
             .is_some_and(|expected| sha256_file(path).is_ok_and(|actual| actual != expected)),
         _ => false,
+    };
+    let recent_changes = connection.query_row("SELECT count(*) FROM file_events WHERE monitored_path_id = ?1 AND occurred_at >= datetime('now', '-60 seconds')", params![monitored_path_id], |row| row.get(0)).map_err(|error| error.to_string())?;
+    Ok(FileEventAnalysisContext {
+        threat_detection_enabled,
+        differs_from_baseline,
+        recent_changes,
     })
-}
-
-pub fn recent_file_event_count(
-    database_path: &std::path::Path,
-    monitored_path_id: i64,
-) -> Result<i64, String> {
-    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
-    connection.query_row("SELECT count(*) FROM file_events WHERE monitored_path_id = ?1 AND occurred_at >= datetime('now', '-60 seconds')", params![monitored_path_id], |row| row.get(0)).map_err(|error| error.to_string())
 }
 
 pub fn persist_threat_assessment(
@@ -644,6 +660,12 @@ pub fn security_report(database_path: &std::path::Path) -> Result<SecurityReport
         recent_detections,
         recent_risk_events,
     };
+    Ok(report)
+}
+
+pub fn save_security_report(database_path: &std::path::Path) -> Result<SecurityReport, String> {
+    let report = security_report(database_path)?;
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
     connection
         .execute(
             "INSERT INTO report_history (report_json) VALUES (?1)",

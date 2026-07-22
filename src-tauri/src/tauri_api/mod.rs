@@ -171,6 +171,12 @@ pub fn get_security_report(app: tauri::AppHandle) -> Result<repository::Security
     repository::security_report(&repository::app_database_path(&app)?)
 }
 #[tauri::command]
+pub fn generate_security_report(
+    app: tauri::AppHandle,
+) -> Result<repository::SecurityReport, String> {
+    repository::save_security_report(&repository::app_database_path(&app)?)
+}
+#[tauri::command]
 pub fn list_file_events_filtered(
     query: Option<String>,
     severity: Option<String>,
