@@ -6,6 +6,7 @@ const navigation = [
   { to: "/monitoring", label: "파일 모니터링" },
   { to: "/events", label: "보안 이벤트" },
   { to: "/policy", label: "보안 정책" },
+  { to: "/about", label: "정보" },
 ];
 
 export function AppLayout() {

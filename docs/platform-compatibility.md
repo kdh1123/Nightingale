@@ -9,5 +9,6 @@
 | 파일 이벤트            | supported (notify)       | supported (FSEvents/notify) | 선택한 경로만, macOS 보호 경로 권한 필요 | macOS 구현, Windows 미검증 |
 | 자동 시작              | supported                | supported                   | 사용자 동의 필요                         | 설계만                     |
 | 보안 저장소            | Credential Manager 검토  | Keychain 검토               | 사용자 인증/잠금 상태                    | 설계만                     |
+| Release bundle         | MSI·NSIS 설정 준비       | `.app`·DMG 설정 및 로컬 빌드 | 플랫폼별 코드 서명 필요                  | macOS bundle 검증 진행 중  |
 
 공통 모델은 optional 필드와 `supported`, `partially_supported`, `permission_required`, `unsupported`, `temporarily_unavailable` 상태를 사용합니다. Windows 빌드/실행은 이 macOS 환경에서 검증하지 않았으며, Windows CI와 실제 장비에서 확인해야 합니다. macOS 보호 폴더는 사용자 파일 접근 권한이 없으면 기준선 스캔 또는 감시가 실패할 수 있습니다.

@@ -3,6 +3,9 @@ name = "nightingale"
 version = "0.1.0"
 description = "A defensive cross-platform security monitor"
 authors = ["Nightingale contributors"]
+license = "MIT"
+homepage = "https://github.com/kdh1123/Nightingale"
+repository = "https://github.com/kdh1123/Nightingale"
 edition = "2021"
 rust-version = "1.77.2"
 

@@ -17,5 +17,14 @@
       "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'"
     }
   },
-  "bundle": { "active": true, "targets": "all", "icon": [] }
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "msi", "nsis"],
+    "category": "Utility",
+    "shortDescription": "로컬 우선 방어형 보안 모니터",
+    "longDescription": "Nightingale은 파일 활동과 시스템 상태를 분석해 설명 가능한 보안 신호를 제공하는 로컬 우선 보안 모니터입니다.",
+    "copyright": "Copyright © 2026 Nightingale contributors",
+    "licenseFile": "../LICENSE",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+  }
 }

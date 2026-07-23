@@ -5,6 +5,7 @@ import { SystemStatusPage } from "../features/system-status/SystemStatusPage";
 import { FileMonitoringPage } from "../features/file-monitoring/FileMonitoringPage";
 import { SecurityEventsPage } from "../features/security-events/SecurityEventsPage";
 import { SecurityManagementPage } from "../features/security-management/SecurityManagementPage";
+import { AboutPage } from "../features/about/AboutPage";
 
 export const router = createBrowserRouter([
   {
@@ -16,6 +17,7 @@ export const router = createBrowserRouter([
       { path: "monitoring", element: <FileMonitoringPage /> },
       { path: "events", element: <SecurityEventsPage /> },
       { path: "policy", element: <SecurityManagementPage /> },
+      { path: "about", element: <AboutPage /> },
     ],
   },
 ]);

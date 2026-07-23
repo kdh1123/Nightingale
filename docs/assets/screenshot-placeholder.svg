@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-label="Nightingale screenshot placeholder">
+  <rect width="1200" height="675" fill="#0b1117"/>
+  <rect x="80" y="70" width="1040" height="535" rx="20" fill="#111c25" stroke="#293945" stroke-width="3"/>
+  <text x="600" y="320" text-anchor="middle" fill="#b9f5dd" font-family="system-ui, sans-serif" font-size="52" font-weight="700">Nightingale</text>
+  <text x="600" y="375" text-anchor="middle" fill="#9cadba" font-family="system-ui, sans-serif" font-size="24">Security dashboard screenshot placeholder</text>
+</svg>

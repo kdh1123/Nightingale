@@ -1,0 +1,37 @@
+name: Release bundles
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            command: npm run tauri:build:release
+            artifact: src-tauri/target/release/bundle
+          - name: Windows
+            os: windows-latest
+            command: npm run tauri:build:windows
+            artifact: src-tauri/target/release/bundle
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: ${{ matrix.command }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nightingale-${{ matrix.name }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error

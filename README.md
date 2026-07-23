@@ -1,75 +1,76 @@
 # Nightingale
 
-Nightingale은 Windows 11과 macOS용 방어 중심 보안 모니터링 애플리케이션입니다. 상용 백신을 대체하지 않으며, 위험 징후를 이해하기 쉬운 설명으로 알려주는 것을 목표로 합니다.
+Nightingale은 Windows 11과 macOS를 위한 로컬 우선 방어형 보안 모니터입니다. 사용자가 선택한 폴더의 활동과 시스템 상태를 기록·분석해 설명 가능한 위험 신호, Incident, 보안 점수를 제공합니다. 상용 백신을 대체하지 않으며 파일을 자동으로 삭제·격리·종료하지 않습니다.
 
-## 현재 단계 — Phase 5
+![Nightingale 화면 자리표시자](docs/assets/screenshot-placeholder.svg)
 
-Phase 0~4의 모니터링·위협 판단·보안 관리 기능을 완료했습니다. Phase 5에서는 감시 이벤트를 경로별로 중복 억제하고 SQLite WAL·busy timeout·조회 인덱스로 장시간 실행 안정성을 강화했습니다. 모든 데이터는 로컬 SQLite에 보존되며, 감시·위협 탐지·Security Score·로그 보관 정책은 앱 설정에서 제어할 수 있습니다. 이 앱은 관찰과 설명만 수행하며 파일을 변경·삭제·차단하지 않습니다.
+## 주요 기능
 
-## 처음 실행하기
+- 시스템·프로세스 상태 확인 및 선택한 폴더의 재귀 파일 감시
+- SHA-256 기준선 기반 무결성 신호와 규칙 기반 Threat Detection
+- Incident 상관관계, severity, Security Score, 내부 알림
+- 설정 영속화, 로그 검색·보관 기간 정책, JSON Security Report
+- 로컬 SQLite 저장소, WAL·busy timeout·조회 인덱스를 통한 장시간 실행 안정성
 
-### 필요한 프로그램
+## 설치 및 실행
+
+### 최종 사용자
+
+1. GitHub Releases에서 운영체제에 맞는 패키지를 내려받습니다.
+2. macOS는 DMG에서 `Nightingale.app`을 Applications로 옮기고 실행합니다. 보호 폴더 감시에는 파일 접근 권한을 허용해야 합니다.
+3. Windows는 MSI 또는 NSIS 설치 프로그램을 실행합니다.
+
+현재 배포 서명·notarization은 준비 문서만 제공하며, 실제 공개 Release 전에는 해당 절차를 완료해야 합니다.
+
+### 개발 환경
 
 - Node.js 22 이상과 npm
-- Rust stable 1.77.2 이상 — [rustup](https://rustup.rs/)로 설치
-- macOS: Xcode Command Line Tools (`xcode-select --install`)
-- Windows 11: Visual Studio C++ Build Tools(MSVC)와 WebView2 Runtime
-
-Rust 설치 뒤에는 새 터미널을 열거나 `. "$HOME/.cargo/env"`를 실행하고, `rustup component add rustfmt clippy`로 검사 도구를 설치합니다. macOS의 전체 Xcode는 개발·빌드에 필요하지 않습니다.
-
-### 설치와 데이터베이스 초기화
+- Rust stable 1.77.2 이상 (`rustfmt`, `clippy` 포함)
+- macOS: Xcode Command Line Tools
+- Windows: Visual Studio C++ Build Tools와 WebView2 Runtime
 
 ```sh
 git clone https://github.com/kdh1123/Nightingale.git
 cd Nightingale
 npm install
-```
-
-별도의 데이터베이스 설치나 수동 migration은 필요하지 않습니다. 첫 Tauri 실행 시 운영체제의 앱 데이터 디렉터리에 `nightingale.sqlite3`를 만들고 migration을 자동 적용합니다. 이 파일에는 사용자가 추가한 감시 경로와 이벤트가 보존됩니다.
-
-### 개발 실행
-
-Tauri 앱 전체를 실행하려면 다음 명령을 사용합니다.
-
-```sh
 npm run tauri dev
 ```
 
-`npm run dev`는 React/Vite 개발 서버만 시작합니다. Tauri command가 필요한 파일 모니터링 기능은 `npm run tauri dev`에서만 동작합니다.
+`npm run dev`는 웹 UI만 실행합니다. Tauri command와 파일 감시는 `npm run tauri dev`에서 사용합니다.
 
-### 테스트와 빌드
+## 빌드와 테스트
 
 ```sh
 npm run typecheck && npm run lint && npm run test && npm run build
 cd src-tauri && cargo fmt --check && cargo check && cargo clippy --all-targets --all-features -- -D warnings && cargo test
 ```
 
-배포용 앱 번들은 `npm run tauri build`로 생성합니다. macOS에서는 `.app` 번들 생성을 확인했으며, Finder를 조작하는 DMG 레이아웃 단계는 자동화하지 않습니다.
-
-### 자주 발생하는 오류
-
-| 증상                                   | 해결 방법                                                                    |
-| -------------------------------------- | ---------------------------------------------------------------------------- |
-| `cargo` 또는 `rustc`를 찾을 수 없음    | rustup 설치 후 새 터미널을 열거나 `. "$HOME/.cargo/env"` 실행                |
-| `rustfmt` 또는 `clippy` 오류           | `rustup component add rustfmt clippy` 실행                                   |
-| macOS 컴파일러·링커 오류               | `xcode-select --install` 실행 후 터미널 재시작                               |
-| Windows에서 빌드 실패                  | MSVC C++ Build Tools와 WebView2 Runtime 설치 확인                            |
-| 보호된 macOS 폴더를 감시할 수 없음     | 시스템 설정에서 Nightingale에 파일 접근 권한 부여 또는 권한이 있는 폴더 선택 |
-| `npm run tauri dev`에서 포트 1420 충돌 | 해당 Vite 프로세스를 종료한 뒤 다시 실행                                     |
-| 감시 경로가 중복되었다는 오류          | 기존 목록에서 해당 경로를 삭제하거나 재개                                    |
-
-### 디스크 용량 정리
-
-Rust 빌드 캐시를 삭제하려면 다음 명령을 실행합니다.
+현재 플랫폼에서 Release bundle을 만들려면 다음을 사용합니다.
 
 ```sh
-cargo clean --manifest-path src-tauri/Cargo.toml
+npm run tauri:build:release  # macOS: .app, .dmg
+npm run tauri:build:windows  # Windows: .msi, NSIS installer
 ```
 
-다음 실행 시에는 다시 컴파일되므로 첫 빌드는 시간이 조금 더 걸릴 수 있습니다.
+## 프로젝트 구조
 
-개발 중에는 사용자의 실제 파일을 변경하지 않습니다. 파일 감시는 사용자가 명시적으로 추가한 폴더에서만 시작됩니다. 자세한 구조와 보안·플랫폼 제약은 [docs](docs/)를 참고하세요. 기술 선택은 [기술 결정](docs/technology-decisions.md)에 기록했습니다.
+```text
+src/                 React feature-first UI
+src-tauri/src/domain/       정책과 모델
+src-tauri/src/application/ 유스케이스
+src-tauri/src/repository/  SQLite 저장소
+src-tauri/src/platform/    OS adapter
+src-tauri/src/tauri_api/   Tauri command 경계
+docs/                     아키텍처, 보안, 플랫폼·배포 문서
+```
 
-## 성능 및 운영상 제한
+## 알려진 제한사항
 
-감시를 일시 중지하면 watcher를 해제하므로 그 동안의 변경은 기록하지 않습니다. 이벤트는 경로·유형별 500ms 중복을 억제하며, OS watcher 전달 버퍼가 가득 찬 경우 최신 이벤트가 버려질 수 있습니다. SQLite는 동시 쓰기 충돌을 최대 5초까지 재시도하지만, 지속적인 대량 변경은 Security Score·Incident 조회 지연을 유발할 수 있습니다. macOS 보호 폴더에는 파일 접근 권한이 필요하고 Windows 실기기 검증은 아직 필요합니다. 배포 전 코드 서명·notarization·Windows CI가 권장됩니다.
+- macOS 보호 폴더에는 사용자 파일 접근 권한이 필요합니다.
+- Windows 파일 watcher·번들은 Windows 실기기와 CI에서 추가 검증이 필요합니다.
+- 높은 빈도의 대량 파일 변경에서는 OS watcher 버퍼가 포화되어 이벤트가 누락될 수 있습니다.
+- Threat Detection은 설명 가능한 규칙 기반 신호이며 악성 행위를 확정하지 않습니다.
+
+## 라이선스
+
+[MIT License](LICENSE)를 사용합니다. 배포·서명·notarization 절차는 [Release 문서](docs/release-and-signing.md)를 참고하세요.
