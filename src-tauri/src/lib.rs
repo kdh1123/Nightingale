@@ -49,6 +49,7 @@ pub fn run() {
             tauri_api::get_app_status,
             tauri_api::get_system_snapshot,
             tauri_api::list_processes,
+            tauri_api::terminate_process,
             tauri_api::add_monitored_path,
             tauri_api::list_monitored_paths,
             tauri_api::remove_monitored_path,

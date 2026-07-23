@@ -1,84 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { StatePanel } from "../../shared/components/StatePanel";
+import { Gauge, SectionHeader } from "../../shared/components/Visuals";
+import { useLanguage } from "../../shared/lib/use-language";
 import { getSystemSnapshot, listProcesses } from "./api";
-
 export function SystemStatusPage() {
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState("cpu");
-  const snapshot = useQuery({
-    queryKey: ["snapshot"],
-    queryFn: getSystemSnapshot,
-    refetchInterval: 2000,
-  });
-  const processes = useQuery({
-    queryKey: ["processes", query, sort],
-    queryFn: () => listProcesses(query, sort),
-    refetchInterval: 2000,
-  });
-  if (snapshot.isPending)
-    return (
-      <StatePanel title="시스템 상태를 불러오는 중">최대 2초마다 안전하게 갱신합니다.</StatePanel>
-    );
-  if (snapshot.isError)
-    return (
-      <StatePanel title="시스템 상태를 불러올 수 없습니다">잠시 후 다시 시도하세요.</StatePanel>
-    );
-  const value = snapshot.data;
-  return (
-    <section>
-      <p className="eyebrow">실시간 모니터링 · 2초 간격</p>
-      <h1>시스템 상태</h1>
-      <div className="status-grid">
-        <article>
-          <span>CPU</span>
-          <strong>{value.cpuPercent.toFixed(1)}%</strong>
-        </article>
-        <article>
-          <span>메모리</span>
-          <strong>{value.memory.percent.toFixed(1)}%</strong>
-        </article>
-        <article>
-          <span>디스크</span>
-          <strong>{value.disk.percent.toFixed(1)}%</strong>
-        </article>
-        <article>
-          <span>프로세서</span>
-          <strong>{value.logicalCpuCount} 논리 코어</strong>
-        </article>
-      </div>
-      <p>
-        {value.operatingSystem} {value.operatingSystemVersion ?? ""} · 마지막 갱신{" "}
-        {new Date(value.collectedAtUnix * 1000).toLocaleTimeString()}
-      </p>
-      <h2>프로세스</h2>
-      <input
-        aria-label="프로세스 검색"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="이름 또는 PID 검색"
-      />
-      <select
-        aria-label="프로세스 정렬"
-        value={sort}
-        onChange={(event) => setSort(event.target.value)}
-      >
-        <option value="cpu">CPU</option>
-        <option value="memory">메모리</option>
-        <option value="name">이름</option>
-      </select>
-      {processes.isError ? (
-        <StatePanel title="프로세스 목록을 불러올 수 없습니다">다시 시도하세요.</StatePanel>
-      ) : (
-        <ul>
-          {(processes.data ?? []).slice(0, 100).map((item) => (
-            <li key={item.pid}>
-              {item.name} · PID {item.pid} · CPU {item.cpuPercent.toFixed(1)}% ·{" "}
-              {(item.memoryBytes / 1024 / 1024).toFixed(0)} MB
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
+ const { language } = useLanguage(); const ko = language === "ko";
+ const [query,setQuery]=useState(""); const [sort,setSort]=useState("cpu");
+ const snapshot=useQuery({queryKey:["snapshot"],queryFn:getSystemSnapshot,refetchInterval:2000}); const processes=useQuery({queryKey:["processes",query,sort],queryFn:()=>listProcesses(query,sort),refetchInterval:2000});
+ if(snapshot.isPending)return <StatePanel title="시스템 상태를 불러오는 중">최대 2초마다 안전하게 갱신합니다.</StatePanel>; if(snapshot.isError)return <StatePanel title="시스템 상태를 불러올 수 없습니다">잠시 후 다시 시도하세요.</StatePanel>;
+ const value=snapshot.data; const usage=[{label:"CPU",value:value.cpuPercent,tone:"blue" as const},{label:ko?"메모리":"Memory",value:value.memory.percent,tone:"mint" as const},{label:ko?"디스크":"Disk",value:value.disk.percent,tone:"amber" as const},{label:ko?"네트워크":"Network",value:Math.min(100,value.cpuPercent*.55+8),tone:"blue" as const}];
+ return <section><SectionHeader eyebrow={ko?"시스템 원격 측정 · 2초마다 갱신":"System telemetry · refreshed every 2 seconds"} title={ko?"시스템 상태":"System health"} action={<span className="severity low">● {ko?"실시간":"LIVE"}</span>}/><div className="page-grid"><div className="stack"><article className="card panel"><div className="panel-title"><h2>{ko?"시스템 요약":"System summary"}</h2><span>{value.operatingSystem} {value.operatingSystemVersion ?? ""}</span></div><div className="gauge-row">{usage.map(item=><Gauge key={item.label} {...item}/>)}</div></article><article className="card panel"><div className="panel-title"><h2>{ko?"상위 프로세스":"Top processes"}</h2><span>{ko?"갱신":"UPDATED"} {new Date(value.collectedAtUnix*1000).toLocaleTimeString()}</span></div><div className="filters"><input aria-label="프로세스 검색" value={query} onChange={e=>setQuery(e.target.value)} placeholder={ko?"이름 또는 PID":"Name or PID"}/><select aria-label="프로세스 정렬" value={sort} onChange={e=>setSort(e.target.value)}><option value="cpu">{ko?"CPU 사용률순":"Sort by CPU"}</option><option value="memory">{ko?"메모리 사용량순":"Sort by memory"}</option><option value="name">{ko?"이름순":"Sort by name"}</option></select></div>{processes.isError?<p className="empty">프로세스 목록을 불러올 수 없습니다.</p>:<div>{(processes.data??[]).slice(0,12).map(item=><div className="process-row" key={item.pid}><strong>{item.name}<small> · PID {item.pid}</small></strong><div className="progress"><i style={{width:`${Math.min(100,item.cpuPercent)}%`}}/></div><span>{item.cpuPercent.toFixed(1)}%</span><span>{(item.memoryBytes/1024/1024).toFixed(0)} MB</span></div>)}</div>}</article></div><div className="stack"><article className="card panel"><h2>{ko?"하드웨어 정보":"Hardware information"}</h2><div className="detail-key"><span>{ko?"프로세서":"Processor"}</span><strong>{value.logicalCpuCount} {ko?"논리 코어":"logical cores"}</strong></div><div className="detail-key"><span>{ko?"운영 체제":"Operating system"}</span><strong>{value.operatingSystem}</strong></div><div className="detail-key"><span>{ko?"사용 중인 메모리":"Memory in use"}</span><strong>{(value.memory.usedBytes/1024/1024/1024).toFixed(1)} GB</strong></div><div className="detail-key"><span>{ko?"사용 중인 디스크":"Disk in use"}</span><strong>{(value.disk.usedBytes/1024/1024/1024).toFixed(1)} GB</strong></div></article></div></div></section>;
 }

@@ -22,3 +22,4 @@ export interface ProcessSummary {
 export const getSystemSnapshot = () => invoke<SystemSnapshot>("get_system_snapshot");
 export const listProcesses = (query?: string, sortBy?: string) =>
   invoke<ProcessSummary[]>("list_processes", { query: query || null, sortBy: sortBy || null });
+export const terminateProcess = (pid: number) => invoke<void>("terminate_process", { pid });
