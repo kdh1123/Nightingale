@@ -72,11 +72,15 @@ pub fn terminate_process(system: &mut System, pid: u32) -> Result<(), String> {
         return Err("Nightingale 자체 프로세스는 종료할 수 없습니다.".to_string());
     }
     system.refresh_processes(ProcessesToUpdate::All, true);
-    let process = system
-        .process(Pid::from_u32(pid))
-        .ok_or_else(|| "해당 프로세스를 찾을 수 없습니다. 이미 종료되었을 수 있습니다.".to_string())?;
+    let process = system.process(Pid::from_u32(pid)).ok_or_else(|| {
+        "해당 프로세스를 찾을 수 없습니다. 이미 종료되었을 수 있습니다.".to_string()
+    })?;
     process
         .kill_with(Signal::Term)
         .ok_or_else(|| "이 운영체제에서는 프로세스 종료를 지원하지 않습니다.".to_string())
-        .and_then(|terminated| terminated.then_some(()).ok_or_else(|| "프로세스 종료 요청이 거부되었습니다. 권한을 확인하세요.".to_string()))
+        .and_then(|terminated| {
+            terminated.then_some(()).ok_or_else(|| {
+                "프로세스 종료 요청이 거부되었습니다. 권한을 확인하세요.".to_string()
+            })
+        })
 }

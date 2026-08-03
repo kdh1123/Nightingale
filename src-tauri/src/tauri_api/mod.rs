@@ -1,4 +1,6 @@
-use crate::application::monitoring::{collect_snapshot, list_processes as collect_processes, terminate_process as terminate};
+use crate::application::monitoring::{
+    collect_snapshot, list_processes as collect_processes, terminate_process as terminate,
+};
 use crate::application::{app_status, baseline, security_management, AppStatus};
 use crate::domain::monitoring::{ProcessSummary, SystemSnapshot};
 use crate::domain::security_management::ApplicationSettings;
@@ -42,7 +44,9 @@ pub fn list_processes(
 
 #[tauri::command]
 pub fn terminate_process(pid: u32, system: tauri::State<'_, Mutex<System>>) -> Result<(), String> {
-    let mut system = system.lock().map_err(|_| "monitoring state is unavailable".to_string())?;
+    let mut system = system
+        .lock()
+        .map_err(|_| "monitoring state is unavailable".to_string())?;
     terminate(&mut system, pid)
 }
 

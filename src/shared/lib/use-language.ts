@@ -1,4 +1,6 @@
 import { useContext } from "react";
 import { LanguageContext } from "./language-context";
 
-export function useLanguage() { return useContext(LanguageContext); }
+export function useLanguage() {
+  return useContext(LanguageContext);
+}
