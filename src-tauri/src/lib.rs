@@ -61,6 +61,7 @@ pub fn run() {
             tauri_api::mark_security_event_reviewed,
             tauri_api::list_incidents,
             tauri_api::update_incident_status,
+            tauri_api::get_incident_timeline,
             tauri_api::get_security_score,
             tauri_api::get_application_settings,
             tauri_api::update_application_settings,

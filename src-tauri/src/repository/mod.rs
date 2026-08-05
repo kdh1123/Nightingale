@@ -113,6 +113,23 @@ pub struct Incident {
     pub last_detected_at: String,
 }
 
+/// An explainable signal that contributed to an incident. File data is joined
+/// here so the UI can show the evidence without guessing from timestamps.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IncidentTimelineEvent {
+    pub security_event_id: i64,
+    pub event_type: String,
+    pub severity: String,
+    pub title: String,
+    pub description: String,
+    pub occurred_at: String,
+    pub reviewed: bool,
+    pub file_event_id: Option<i64>,
+    pub file_event_kind: Option<String>,
+    pub file_path: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SecurityScore {
@@ -496,6 +513,37 @@ pub fn update_incident_status(
     Ok(())
 }
 
+pub fn incident_timeline(
+    database_path: &std::path::Path,
+    incident_id: i64,
+) -> Result<Vec<IncidentTimelineEvent>, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(
+            "SELECT se.id, se.event_type, se.severity, se.title, se.description, se.occurred_at, se.reviewed, fe.id, fe.event_kind, fe.file_path FROM incident_events ie JOIN security_events se ON se.id = ie.security_event_id LEFT JOIN file_events fe ON fe.id = se.file_event_id WHERE ie.incident_id = ?1 ORDER BY se.occurred_at ASC, se.id ASC",
+        )
+        .map_err(|error| error.to_string())?;
+    let events = statement
+        .query_map(params![incident_id], |row| {
+            Ok(IncidentTimelineEvent {
+                security_event_id: row.get(0)?,
+                event_type: row.get(1)?,
+                severity: row.get(2)?,
+                title: row.get(3)?,
+                description: row.get(4)?,
+                occurred_at: row.get(5)?,
+                reviewed: row.get::<_, i64>(6)? != 0,
+                file_event_id: row.get(7)?,
+                file_event_kind: row.get(8)?,
+                file_path: row.get(9)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(events)
+}
+
 pub fn security_score(database_path: &std::path::Path) -> Result<SecurityScore, String> {
     let connection = open_connection(database_path).map_err(|error| error.to_string())?;
     let mut statement = connection.prepare("SELECT severity FROM incidents WHERE status != 'resolved' AND last_detected_at >= datetime('now', '-7 days')").map_err(|error| error.to_string())?;
@@ -730,6 +778,13 @@ mod tests {
         let incidents = list_incidents(&path, Some("high"), Some("open")).expect("incidents");
         assert_eq!(incidents.len(), 1);
         assert_eq!(incidents[0].event_count, 2);
+        let timeline = incident_timeline(&path, incidents[0].id).expect("timeline");
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline[0].event_type, "mass_file_change");
+        assert_eq!(
+            timeline[0].file_path.as_deref(),
+            Some("/tmp/nightingale-threat/a.txt")
+        );
         assert_eq!(security_score(&path).expect("score").score, 75);
         std::fs::remove_file(path).expect("cleanup");
     }

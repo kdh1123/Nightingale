@@ -19,6 +19,18 @@ export interface Incident {
   firstDetectedAt: string;
   lastDetectedAt: string;
 }
+export interface IncidentTimelineEvent {
+  securityEventId: number;
+  eventType: string;
+  severity: string;
+  title: string;
+  description: string;
+  occurredAt: string;
+  reviewed: boolean;
+  fileEventId: number | null;
+  fileEventKind: string | null;
+  filePath: string | null;
+}
 export interface SecurityScore {
   score: number;
   openIncidentCount: number;
@@ -39,6 +51,8 @@ export const listIncidents = (severity?: string, status?: string) =>
   invoke<Incident[]>("list_incidents", { severity: severity || null, status: status || null });
 export const updateIncidentStatus = (id: number, status: Incident["status"]) =>
   invoke<void>("update_incident_status", { id, status });
+export const getIncidentTimeline = (id: number) =>
+  invoke<IncidentTimelineEvent[]>("get_incident_timeline", { id });
 export const getSecurityScore = () => invoke<SecurityScore>("get_security_score");
 export const listFileEventsFiltered = (filters: {
   query?: string;

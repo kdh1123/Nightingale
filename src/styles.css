@@ -698,6 +698,76 @@ p {
 .incident-list button {
   margin-top: 10px;
 }
+.incident-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.incident-timeline > li {
+  position: relative;
+  padding: 14px 0 14px 18px;
+  border-bottom: 1px solid #ffffff0d;
+}
+.incident-timeline > li::before {
+  position: absolute;
+  top: 31px;
+  bottom: -16px;
+  left: 3px;
+  width: 1px;
+  background: #2b4944;
+  content: "";
+}
+.incident-timeline > li:last-child {
+  border-bottom: 0;
+}
+.incident-timeline > li:last-child::before {
+  display: none;
+}
+.timeline-evidence-heading {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.timeline-evidence-heading .timeline-dot {
+  width: 7px;
+  height: 7px;
+}
+.incident-timeline time,
+.incident-timeline p,
+.incident-timeline dt,
+.incident-timeline dd {
+  margin: 0;
+  font-size: 11px;
+}
+.incident-timeline time {
+  display: block;
+  margin: 5px 0;
+  color: var(--muted);
+  font-family: "DM Mono", monospace;
+}
+.incident-timeline p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.incident-timeline dl {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 0;
+}
+.incident-timeline dl > div {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 8px;
+}
+.incident-timeline dt {
+  color: #6e8b82;
+}
+.incident-timeline dd {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
 .empty {
   padding: 26px 0;
   color: var(--muted);

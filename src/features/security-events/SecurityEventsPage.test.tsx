@@ -33,7 +33,22 @@ vi.mock("./api", () => ({
     ]),
   ),
   updateIncidentStatus: vi.fn(),
-  listFileEventsFiltered: vi.fn(() => Promise.resolve([])),
+  getIncidentTimeline: vi.fn(() =>
+    Promise.resolve([
+      {
+        securityEventId: 1,
+        eventType: "mass_file_change",
+        severity: "high",
+        title: "대량 파일 변경 감지",
+        description: "짧은 시간에 다수의 파일 변경이 감지되었습니다.",
+        occurredAt: "2026-07-22 12:00:00",
+        reviewed: false,
+        fileEventId: 4,
+        fileEventKind: "modified",
+        filePath: "/watch/a.txt",
+      },
+    ]),
+  ),
 }));
 
 describe("SecurityEventsPage", () => {
@@ -46,5 +61,7 @@ describe("SecurityEventsPage", () => {
     expect(await screen.findByText("파일 활동 감지")).toBeInTheDocument();
     expect(await screen.findByText("대량 파일 변경 감지")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "검토 완료" })).toBeInTheDocument();
+    expect(await screen.findByText("탐지 규칙")).toBeInTheDocument();
+    expect(screen.getByText("mass_file_change")).toBeInTheDocument();
   });
 });

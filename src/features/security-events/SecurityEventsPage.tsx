@@ -5,7 +5,7 @@ import { findByIdOrFirst } from "../../shared/lib/collection";
 import { useAsyncAction } from "../../shared/lib/use-async-action";
 import { useLanguage } from "../../shared/lib/use-language";
 import {
-  listFileEventsFiltered,
+  getIncidentTimeline,
   listIncidents,
   listSecurityEvents,
   markSecurityEventReviewed,
@@ -32,22 +32,24 @@ export function SecurityEventsPage() {
     queryFn: () => listIncidents(severity, status),
     refetchInterval: 2000,
   });
-  const fileEvents = useQuery({
-    queryKey: ["file-events-filtered"],
-    queryFn: () => listFileEventsFiltered({}),
-  });
   // A resolved or filtered-out selection should not strand the detail panel.
   const active = findByIdOrFirst(incidents.data, selected);
+  const timeline = useQuery({
+    queryKey: ["incident-timeline", active?.id],
+    queryFn: () => getIncidentTimeline(active?.id ?? 0),
+    enabled: active !== undefined,
+    refetchInterval: 2000,
+  });
   const review = (id: number) =>
     run(
       id,
       () => markSecurityEventReviewed(id),
       () => client.invalidateQueries({ queryKey: ["security-events"] }),
     );
-  const resolve = (id: number) =>
+  const setIncidentStatus = (id: number, nextStatus: "investigating" | "resolved") =>
     run(
       id,
-      () => updateIncidentStatus(id, "resolved"),
+      () => updateIncidentStatus(id, nextStatus),
       () => client.invalidateQueries({ queryKey: ["incidents"] }),
     );
   return (
@@ -132,7 +134,10 @@ export function SecurityEventsPage() {
           <ul className="event-list incident-list">
             {incidents.data?.map((item) => (
               <li key={item.id}>
-                <button className="path-item" onClick={() => setSelected(item.id)}>
+                <button
+                  className={`path-item ${active?.id === item.id ? "selected" : ""}`}
+                  onClick={() => setSelected(item.id)}
+                >
                   <SeverityBadge severity={item.severity} />
                   <strong>{item.title}</strong>
                   <span>{item.description}</span>
@@ -170,8 +175,23 @@ export function SecurityEventsPage() {
                   <span>{ko ? "연관 이벤트" : "Related events"}</span>
                   <strong>{active.eventCount}</strong>
                 </div>
+                <div className="detail-key">
+                  <span>{ko ? "최근 탐지" : "Last detected"}</span>
+                  <strong>{active.lastDetectedAt}</strong>
+                </div>
+                {active.status === "open" ? (
+                  <button
+                    className="btn secondary"
+                    onClick={() => void setIncidentStatus(active.id, "investigating")}
+                  >
+                    {ko ? "조사 시작" : "Start investigation"}
+                  </button>
+                ) : null}
                 {active.status !== "resolved" ? (
-                  <button className="btn" onClick={() => void resolve(active.id)}>
+                  <button
+                    className="btn"
+                    onClick={() => void setIncidentStatus(active.id, "resolved")}
+                  >
                     {ko ? "해결됨으로 표시" : "Mark resolved"}
                   </button>
                 ) : null}
@@ -181,15 +201,49 @@ export function SecurityEventsPage() {
             )}
           </article>
           <article className="card panel">
-            <h2>{ko ? "연관 파일 이벤트" : "Related file events"}</h2>
-            <ul className="event-list">
-              {fileEvents.data?.slice(0, 3).map((e) => (
-                <li key={e.id}>
-                  <strong>{e.eventKind}</strong>
-                  <span>{e.filePath}</span>
-                </li>
-              )) ?? <li className="empty">{ko ? "관련 이벤트 없음" : "No related events"}</li>}
-            </ul>
+            <div className="panel-title">
+              <h2>{ko ? "조사 타임라인" : "Investigation timeline"}</h2>
+              <span>{timeline.data?.length ?? 0} {ko ? "개 근거" : "EVIDENCE"}</span>
+            </div>
+            {timeline.isPending ? (
+              <p className="empty">{ko ? "근거를 불러오는 중…" : "Loading evidence…"}</p>
+            ) : timeline.data?.length ? (
+              <ol className="incident-timeline">
+                {timeline.data.map((event) => (
+                  <li key={event.securityEventId}>
+                    <div className="timeline-evidence-heading">
+                      <i className="timeline-dot" />
+                      <strong>{event.title}</strong>
+                      <SeverityBadge severity={event.severity} />
+                    </div>
+                    <time>{event.occurredAt}</time>
+                    <p>{event.description}</p>
+                    <dl>
+                      <div>
+                        <dt>{ko ? "탐지 규칙" : "Detection rule"}</dt>
+                        <dd>{event.eventType}</dd>
+                      </div>
+                      {event.filePath ? (
+                        <div>
+                          <dt>{ko ? "연관 파일" : "Related file"}</dt>
+                          <dd>{event.filePath}</dd>
+                        </div>
+                      ) : null}
+                      {event.fileEventKind ? (
+                        <div>
+                          <dt>{ko ? "파일 활동" : "File activity"}</dt>
+                          <dd>{event.fileEventKind}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="empty">
+                {ko ? "이 Incident에 연결된 탐지 근거가 없습니다." : "No detection evidence is linked to this incident."}
+              </p>
+            )}
           </article>
         </div>
       </div>
