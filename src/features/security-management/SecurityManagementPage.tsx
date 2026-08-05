@@ -10,17 +10,27 @@ import {
 import { useAsyncAction } from "../../shared/lib/use-async-action";
 import {
   cleanupSecurityLogs,
+  addAllowlistEntry,
+  getDetectionPolicy,
   getApplicationSettings,
   getSecurityReport,
+  listAllowlistAudit,
+  listAllowlistEntries,
   listNotifications,
   markNotificationRead,
+  removeAllowlistEntry,
+  updateDetectionPolicy,
   updateApplicationSettings,
   type ApplicationSettings,
+  type AllowlistEntry,
+  type DetectionPolicy,
 } from "./api";
 const categories = [
   "General",
   "Monitoring",
   "Security",
+  "Detection",
+  "Allowlist",
   "Notification",
   "Appearance",
   "Database",
@@ -30,11 +40,19 @@ export function SecurityManagementPage() {
   const client = useQueryClient();
   const [category, setCategory] = useState("General");
   const [message, setMessage] = useState<string | null>(null);
-  const { activeTask, error, run } = useAsyncAction<"save" | "cleanup" | "read">(
+  const [allowlistType, setAllowlistType] = useState<AllowlistEntry["entryType"]>("path");
+  const [allowlistValue, setAllowlistValue] = useState("");
+  const [allowlistExpiry, setAllowlistExpiry] = useState("0");
+  const { activeTask, error, run } = useAsyncAction<
+    "save" | "cleanup" | "read" | "policy" | "allowlist-add" | "allowlist-remove"
+  >(
     "요청을 처리할 수 없습니다.",
   );
   const settings = useQuery({ queryKey: ["settings"], queryFn: getApplicationSettings });
   const report = useQuery({ queryKey: ["security-report"], queryFn: getSecurityReport });
+  const policy = useQuery({ queryKey: ["detection-policy"], queryFn: getDetectionPolicy });
+  const allowlist = useQuery({ queryKey: ["allowlist"], queryFn: listAllowlistEntries });
+  const allowlistAudit = useQuery({ queryKey: ["allowlist-audit"], queryFn: listAllowlistAudit });
   const notifications = useQuery({
     queryKey: ["notifications"],
     queryFn: listNotifications,
@@ -51,7 +69,7 @@ export function SecurityManagementPage() {
         잠시 후 다시 시도해 주세요.
       </StatePanel>
     );
-  const isSaving = activeTask === "save" || activeTask === "cleanup";
+  const isSaving = activeTask !== null;
   const save = (next: ApplicationSettings) =>
     run(
       "save",
@@ -71,6 +89,47 @@ export function SecurityManagementPage() {
       "read",
       () => markNotificationRead(id),
       () => client.invalidateQueries({ queryKey: ["notifications"] }),
+    );
+  const savePolicy = (next: DetectionPolicy) =>
+    run(
+      "policy",
+      () => updateDetectionPolicy(next),
+      async () => {
+        await client.invalidateQueries({ queryKey: ["detection-policy"] });
+        setMessage("Detection policy saved.");
+      },
+    );
+  const addTrustedItem = () => {
+    if (!allowlistValue.trim()) return;
+    void run(
+      "allowlist-add",
+      () =>
+        addAllowlistEntry(
+          allowlistType,
+          allowlistValue,
+          allowlistExpiry === "0" ? null : Number(allowlistExpiry),
+        ),
+      async () => {
+        setAllowlistValue("");
+        await Promise.all([
+          client.invalidateQueries({ queryKey: ["allowlist"] }),
+          client.invalidateQueries({ queryKey: ["allowlist-audit"] }),
+        ]);
+        setMessage("Trusted item added. Matching file activity will not create security signals.");
+      },
+    );
+  };
+  const removeTrustedItem = (id: number) =>
+    run(
+      "allowlist-remove",
+      () => removeAllowlistEntry(id),
+      async () => {
+        await Promise.all([
+          client.invalidateQueries({ queryKey: ["allowlist"] }),
+          client.invalidateQueries({ queryKey: ["allowlist-audit"] }),
+        ]);
+        setMessage("Trusted item removed.");
+      },
     );
   const toggle = (key: keyof ApplicationSettings) => {
     const value = settings.data[key];
@@ -213,6 +272,137 @@ export function SecurityManagementPage() {
                   <option value="dark">Dark</option>
                 </select>
               </label>
+            ) : category === "Detection" ? (
+              policy.data ? (
+                <>
+                  <label className="setting-row">
+                    <span>
+                      Detection sensitivity
+                      <small>Safe preset thresholds; higher sensitivity reports mass changes sooner</small>
+                    </span>
+                    <select
+                      className="field"
+                      value={policy.data.sensitivity}
+                      disabled={isSaving}
+                      onChange={(e) =>
+                        void savePolicy({
+                          ...policy.data,
+                          sensitivity: e.target.value as DetectionPolicy["sensitivity"],
+                        })
+                      }
+                    >
+                      <option value="low">Low — 35 changes / minute</option>
+                      <option value="medium">Medium — 20 changes / minute</option>
+                      <option value="high">High — 10 changes / minute</option>
+                    </select>
+                  </label>
+                  {(
+                    [
+                      ["massFileChanges", "Mass file changes", "Detect unusual bursts of changes"],
+                      [
+                        "suspiciousFileActivity",
+                        "Suspicious file activity",
+                        "Detect script and executable file activity",
+                      ],
+                      [
+                        "integrityChanges",
+                        "Baseline integrity changes",
+                        "Detect changes from the known-good baseline",
+                      ],
+                    ] as const
+                  ).map(([key, label, description]) => (
+                    <label className="setting-row" key={key}>
+                      <span>
+                        {label}<small>{description}</small>
+                      </span>
+                      <input
+                        className="switch"
+                        type="checkbox"
+                        checked={policy.data.features[key]}
+                        disabled={isSaving}
+                        onChange={() =>
+                          void savePolicy({
+                            ...policy.data,
+                            features: { ...policy.data.features, [key]: !policy.data.features[key] },
+                          })
+                        }
+                      />
+                    </label>
+                  ))}
+                </>
+              ) : (
+                <p className="empty">Loading detection policy…</p>
+              )
+            ) : category === "Allowlist" ? (
+              <>
+                <p className="setting-help">
+                  Trusted paths and extensions stay in the file log, but do not create security signals or Incidents.
+                </p>
+                <div className="allowlist-form">
+                  <select
+                    className="field"
+                    value={allowlistType}
+                    onChange={(e) => setAllowlistType(e.target.value as AllowlistEntry["entryType"])}
+                    disabled={isSaving}
+                  >
+                    <option value="path">Path or folder</option>
+                    <option value="extension">File extension</option>
+                  </select>
+                  <input
+                    className="field"
+                    value={allowlistValue}
+                    placeholder={allowlistType === "path" ? "/path/to/trusted-folder" : "log"}
+                    onChange={(e) => setAllowlistValue(e.target.value)}
+                    disabled={isSaving}
+                  />
+                  <select
+                    className="field"
+                    value={allowlistExpiry}
+                    onChange={(e) => setAllowlistExpiry(e.target.value)}
+                    disabled={isSaving}
+                  >
+                    <option value="0">No expiry</option>
+                    <option value="7">7 days</option>
+                    <option value="30">30 days</option>
+                    <option value="90">90 days</option>
+                  </select>
+                  <button
+                    className="btn"
+                    disabled={isSaving || !allowlistValue.trim()}
+                    onClick={addTrustedItem}
+                  >
+                    Add trusted item
+                  </button>
+                </div>
+                <ul className="event-list">
+                  {allowlist.data?.map((entry) => (
+                    <li key={entry.id} className="allowlist-entry">
+                      <div>
+                        <strong>{entry.value}</strong>
+                        <span>
+                          {entry.entryType} · {entry.expiresAt ? `Expires ${entry.expiresAt}` : "No expiry"}
+                        </span>
+                      </div>
+                      <button
+                        className="btn secondary"
+                        disabled={isSaving}
+                        onClick={() => void removeTrustedItem(entry.id)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  )) ?? <li className="empty">No trusted items yet.</li>}
+                </ul>
+                <h3 className="subsection-title">Recent changes</h3>
+                <ul className="event-list compact-list">
+                  {allowlistAudit.data?.slice(0, 5).map((entry) => (
+                    <li key={entry.id}>
+                      <strong>{entry.action} · {entry.value}</strong>
+                      <span>{entry.entryType} · {entry.occurredAt}</span>
+                    </li>
+                  )) ?? <li className="empty">No allowlist changes yet.</li>}
+                </ul>
+              </>
             ) : category === "Database" ? (
               <>
                 <label className="setting-row">

@@ -1,4 +1,4 @@
-use crate::domain::file_monitoring::FileEventKind;
+use crate::domain::{file_monitoring::FileEventKind, policy::SecurityPolicy};
 use serde::{Deserialize, Serialize};
 
 pub const CORRELATION_WINDOW_SECONDS: i64 = 300;
@@ -41,6 +41,7 @@ pub struct FileEventContext<'a> {
     pub path: &'a str,
     pub differs_from_baseline: bool,
     pub recent_changes: i64,
+    pub policy: &'a SecurityPolicy,
 }
 
 #[derive(Clone, Debug)]
@@ -71,28 +72,34 @@ impl ThreatDetectionService {
                         .is_some_and(|value| value.eq_ignore_ascii_case(extension))
                 });
         let (event_type, severity, title, description) =
-            if context.recent_changes >= Self::MASS_CHANGE_THRESHOLD {
+            if context.policy.features.mass_file_changes
+                && context.recent_changes >= mass_change_threshold(context.policy)
+            {
                 (
                     "mass_file_change",
                     Severity::High,
                     "대량 파일 변경 감지",
                     "짧은 시간에 다수의 파일 변경이 감지되었습니다.",
                 )
-            } else if context.differs_from_baseline && suspicious_extension {
+            } else if context.policy.features.integrity_changes
+                && context.differs_from_baseline
+                && suspicious_extension
+            {
                 (
                     "suspicious_integrity_change",
                     Severity::High,
                     "의심스러운 파일 무결성 변경",
                     "기준선 파일의 실행 가능 또는 스크립트 파일 변경이 감지되었습니다.",
                 )
-            } else if context.differs_from_baseline {
+            } else if context.policy.features.integrity_changes && context.differs_from_baseline {
                 (
                     "integrity_changed",
                     Severity::Medium,
                     "무결성 기준선과 다른 파일 활동",
                     "선택한 감시 폴더에서 기준선과 다른 파일 생성·변경·삭제가 감지되었습니다.",
                 )
-            } else if suspicious_extension
+            } else if context.policy.features.suspicious_file_activity
+                && suspicious_extension
                 && matches!(
                     context.kind,
                     FileEventKind::Created | FileEventKind::Modified
@@ -125,6 +132,14 @@ impl ThreatDetectionService {
     }
 }
 
+fn mass_change_threshold(policy: &SecurityPolicy) -> i64 {
+    match policy.sensitivity {
+        crate::domain::policy::Sensitivity::Low => 35,
+        crate::domain::policy::Sensitivity::Medium => ThreatDetectionService::MASS_CHANGE_THRESHOLD,
+        crate::domain::policy::Sensitivity::High => 10,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -136,6 +151,7 @@ mod tests {
             path: "/watch/a.txt",
             differs_from_baseline: false,
             recent_changes: 20,
+            policy: &SecurityPolicy::default(),
         });
         assert_eq!(mass.severity, Severity::High);
         let suspicious = ThreatDetectionService::assess_file_event(FileEventContext {
@@ -143,6 +159,7 @@ mod tests {
             path: "/watch/update.ps1",
             differs_from_baseline: true,
             recent_changes: 1,
+            policy: &SecurityPolicy::default(),
         });
         assert_eq!(suspicious.severity, Severity::High);
     }

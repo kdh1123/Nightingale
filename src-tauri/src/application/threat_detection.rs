@@ -16,12 +16,13 @@ pub fn analyze_file_event(
 ) -> Result<(), String> {
     let context =
         repository::file_event_analysis_context(database_path, monitored_path_id, path, kind)?;
-    if !context.threat_detection_enabled {
+    if !context.threat_detection_enabled || context.allowlisted {
         return Ok(());
     }
     let assessment = ThreatDetectionService::assess_file_event(FileEventContext {
         kind,
         path: &path.to_string_lossy(),
+        policy: &context.policy,
         differs_from_baseline: context.differs_from_baseline,
         recent_changes: context.recent_changes,
     });

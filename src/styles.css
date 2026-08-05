@@ -686,6 +686,30 @@ p {
 .event-list li:last-child {
   border-bottom: 0;
 }
+.allowlist-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.4fr) minmax(110px, 0.6fr) auto;
+  gap: 8px;
+  margin: 14px 0;
+}
+.allowlist-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.setting-help {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.subsection-title {
+  margin: 20px 0 0;
+  font-size: 13px;
+}
+.compact-list li {
+  padding: 9px 0;
+}
 .event-list strong,
 .event-list span {
   display: block;

@@ -1,9 +1,10 @@
 use crate::domain::{
     file_monitoring::{sha256_file, FileEventKind},
+    policy::SecurityPolicy,
     security_management::ApplicationSettings,
     threat_detection::{Severity, ThreatAssessment, CORRELATION_WINDOW_SECONDS},
 };
-use rusqlite::{params, Connection, ErrorCode};
+use rusqlite::{params, Connection, ErrorCode, OptionalExtension};
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
@@ -52,6 +53,11 @@ impl Database {
         }
         if current_version < 5 {
             connection.execute_batch(include_str!("../../migrations/0005_performance.sql"))?;
+        }
+        if current_version < 6 {
+            connection.execute_batch(include_str!(
+                "../../migrations/0006_allowlist_and_detection_policy.sql"
+            ))?;
         }
         Ok(Self {
             _connection: connection,
@@ -132,6 +138,27 @@ pub struct IncidentTimelineEvent {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AllowlistEntry {
+    pub id: i64,
+    pub entry_type: String,
+    pub value: String,
+    pub expires_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllowlistAuditEntry {
+    pub id: i64,
+    pub entry_id: Option<i64>,
+    pub action: String,
+    pub entry_type: String,
+    pub value: String,
+    pub occurred_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SecurityScore {
     pub score: i64,
     pub open_incident_count: i64,
@@ -176,6 +203,8 @@ pub struct SeverityCounts {
 /// Values needed by the detector, loaded through one read connection per event.
 pub struct FileEventAnalysisContext {
     pub threat_detection_enabled: bool,
+    pub allowlisted: bool,
+    pub policy: SecurityPolicy,
     pub differs_from_baseline: bool,
     pub recent_changes: i64,
 }
@@ -251,7 +280,10 @@ pub fn file_event_analysis_context(
         )
         .map_err(|error| error.to_string())?
         != 0;
-    let expected_hash = connection.query_row("SELECT sha256 FROM file_integrity_baselines WHERE monitored_path_id = ?1 AND file_path = ?2", params![monitored_path_id, path.to_string_lossy()], |row| row.get::<_, String>(0)).ok();
+    let file_path = path.to_string_lossy();
+    let allowlisted = allowlist_matches(&connection, &file_path)?;
+    let policy = detection_policy_from_connection(&connection)?;
+    let expected_hash = connection.query_row("SELECT sha256 FROM file_integrity_baselines WHERE monitored_path_id = ?1 AND file_path = ?2", params![monitored_path_id, file_path], |row| row.get::<_, String>(0)).ok();
     let differs_from_baseline = match kind {
         FileEventKind::Deleted => expected_hash.is_some(),
         FileEventKind::Created => expected_hash.is_none(),
@@ -262,9 +294,171 @@ pub fn file_event_analysis_context(
     let recent_changes = connection.query_row("SELECT count(*) FROM file_events WHERE monitored_path_id = ?1 AND occurred_at >= datetime('now', '-60 seconds')", params![monitored_path_id], |row| row.get(0)).map_err(|error| error.to_string())?;
     Ok(FileEventAnalysisContext {
         threat_detection_enabled,
+        allowlisted,
+        policy,
         differs_from_baseline,
         recent_changes,
     })
+}
+
+fn detection_policy_from_connection(connection: &Connection) -> Result<SecurityPolicy, String> {
+    let raw = connection
+        .query_row(
+            "SELECT policy_json FROM security_policies ORDER BY version DESC LIMIT 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    raw.map(|json| serde_json::from_str(&json).map_err(|error| error.to_string()))
+        .transpose()
+        .map(|policy| policy.unwrap_or_default())
+}
+
+fn allowlist_matches(connection: &Connection, file_path: &str) -> Result<bool, String> {
+    let extension = std::path::Path::new(file_path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM allowlist_entries WHERE (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP) AND ((entry_type = 'path' AND (?1 = value OR ?1 LIKE value || '/%')) OR (entry_type = 'extension' AND value = ?2)))",
+            params![file_path, extension],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|result| result != 0)
+        .map_err(|error| error.to_string())
+}
+
+pub fn detection_policy(database_path: &std::path::Path) -> Result<SecurityPolicy, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    detection_policy_from_connection(&connection)
+}
+
+pub fn save_detection_policy(
+    database_path: &std::path::Path,
+    mut policy: SecurityPolicy,
+) -> Result<SecurityPolicy, String> {
+    policy.validate().map_err(str::to_string)?;
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let next_version = connection
+        .query_row(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM security_policies",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    policy.version = next_version;
+    connection
+        .execute(
+            "INSERT INTO security_policies (version, policy_json) VALUES (?1, ?2)",
+            params![
+                policy.version,
+                serde_json::to_string(&policy).map_err(|error| error.to_string())?
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(policy)
+}
+
+pub fn list_allowlist_entries(
+    database_path: &std::path::Path,
+) -> Result<Vec<AllowlistEntry>, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare("SELECT id, entry_type, value, expires_at, created_at FROM allowlist_entries ORDER BY created_at DESC, id DESC")
+        .map_err(|error| error.to_string())?;
+    let entries = statement
+        .query_map([], |row| {
+            Ok(AllowlistEntry {
+                id: row.get(0)?,
+                entry_type: row.get(1)?,
+                value: row.get(2)?,
+                expires_at: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(entries)
+}
+
+pub fn add_allowlist_entry(
+    database_path: &std::path::Path,
+    entry_type: &str,
+    value: &str,
+    expires_in_days: Option<i64>,
+) -> Result<AllowlistEntry, String> {
+    if !["path", "extension"].contains(&entry_type) || value.trim().is_empty() {
+        return Err("신뢰 항목 형식이 올바르지 않습니다.".to_string());
+    }
+    if expires_in_days.is_some_and(|days| !(1..=3650).contains(&days)) {
+        return Err("만료 기간은 1~3650일이어야 합니다.".to_string());
+    }
+    let value = if entry_type == "extension" {
+        value.trim().trim_start_matches('.').to_ascii_lowercase()
+    } else {
+        value.trim().trim_end_matches('/').to_string()
+    };
+    if value.is_empty() {
+        return Err("신뢰 항목 값이 비어 있습니다.".to_string());
+    }
+    let mut connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    transaction.execute("INSERT INTO allowlist_entries (entry_type, value, expires_at) VALUES (?1, ?2, CASE WHEN ?3 IS NULL THEN NULL ELSE datetime('now', '+' || ?3 || ' days') END)", params![entry_type, value, expires_in_days]).map_err(|error| error.to_string())?;
+    let id = transaction.last_insert_rowid();
+    transaction.execute("INSERT INTO allowlist_audit (entry_id, action, entry_type, value) VALUES (?1, 'added', ?2, ?3)", params![id, entry_type, value]).map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())?;
+    let entries = list_allowlist_entries(database_path)?;
+    entries
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| "신뢰 항목을 찾을 수 없습니다.".to_string())
+}
+
+pub fn remove_allowlist_entry(database_path: &std::path::Path, id: i64) -> Result<(), String> {
+    let mut connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| error.to_string())?;
+    let (entry_type, value): (String, String) = transaction
+        .query_row(
+            "SELECT entry_type, value FROM allowlist_entries WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| error.to_string())?;
+    transaction
+        .execute("DELETE FROM allowlist_entries WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    transaction.execute("INSERT INTO allowlist_audit (entry_id, action, entry_type, value) VALUES (?1, 'removed', ?2, ?3)", params![id, entry_type, value]).map_err(|error| error.to_string())?;
+    transaction.commit().map_err(|error| error.to_string())
+}
+
+pub fn list_allowlist_audit(
+    database_path: &std::path::Path,
+) -> Result<Vec<AllowlistAuditEntry>, String> {
+    let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare("SELECT id, entry_id, action, entry_type, value, occurred_at FROM allowlist_audit ORDER BY occurred_at DESC, id DESC LIMIT 50").map_err(|error| error.to_string())?;
+    let entries = statement
+        .query_map([], |row| {
+            Ok(AllowlistAuditEntry {
+                id: row.get(0)?,
+                entry_id: row.get(1)?,
+                action: row.get(2)?,
+                entry_type: row.get(3)?,
+                value: row.get(4)?,
+                occurred_at: row.get(5)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(entries)
 }
 
 pub fn persist_threat_assessment(
@@ -786,6 +980,40 @@ mod tests {
             Some("/tmp/nightingale-threat/a.txt")
         );
         assert_eq!(security_score(&path).expect("score").score, 75);
+        std::fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn allowlist_is_audited_and_suppresses_matching_file_analysis() {
+        let path = std::env::temp_dir().join(format!(
+            "nightingale-allowlist-{}-{}-{}.sqlite3",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos(),
+            "test"
+        ));
+        Database::open(path.clone()).expect("database");
+        let monitored = add_monitored_path(&path, std::path::Path::new("/tmp/nightingale-allow"))
+            .expect("monitored path");
+        let entry =
+            add_allowlist_entry(&path, "extension", ".log", Some(30)).expect("allowlist entry");
+        assert_eq!(entry.value, "log");
+        let context = file_event_analysis_context(
+            &path,
+            monitored,
+            std::path::Path::new("/tmp/nightingale-allow/build.log"),
+            FileEventKind::Created,
+        )
+        .expect("analysis context");
+        assert!(context.allowlisted);
+        remove_allowlist_entry(&path, entry.id).expect("remove entry");
+        assert_eq!(list_allowlist_audit(&path).expect("audit").len(), 2);
+        let mut policy = detection_policy(&path).expect("default policy");
+        policy.sensitivity = crate::domain::policy::Sensitivity::High;
+        let saved = save_detection_policy(&path, policy).expect("saved policy");
+        assert_eq!(saved.sensitivity, crate::domain::policy::Sensitivity::High);
         std::fs::remove_file(path).expect("cleanup");
     }
 }
