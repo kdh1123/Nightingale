@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { SectionHeader, SeverityBadge } from "../../shared/components/Visuals";
 import { findByIdOrFirst } from "../../shared/lib/collection";
+import { LIVE_REFETCH_MS, queryKeys } from "../../shared/lib/query";
 import { useAsyncAction } from "../../shared/lib/use-async-action";
 import { useLanguage } from "../../shared/lib/use-language";
 import {
@@ -27,16 +28,16 @@ export function FileMonitoringPage() {
   } = useAsyncAction<number>(
     ko ? "요청을 처리할 수 없습니다." : "The request could not be completed.",
   );
-  const paths = useQuery({ queryKey: ["monitored-paths"], queryFn: listMonitoredPaths });
+  const paths = useQuery({ queryKey: queryKeys.monitoredPaths, queryFn: listMonitoredPaths });
   const events = useQuery({
-    queryKey: ["file-events"],
+    queryKey: queryKeys.fileEvents,
     queryFn: listFileEvents,
-    refetchInterval: 2000,
+    refetchInterval: LIVE_REFETCH_MS,
   });
   const refresh = () =>
     Promise.all([
-      client.invalidateQueries({ queryKey: ["monitored-paths"] }),
-      client.invalidateQueries({ queryKey: ["file-events"] }),
+      client.invalidateQueries({ queryKey: queryKeys.monitoredPaths }),
+      client.invalidateQueries({ queryKey: queryKeys.fileEvents }),
     ]);
   // Fall back to the first remaining location after a selected location is removed.
   const active = findByIdOrFirst(paths.data, selected);

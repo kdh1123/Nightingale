@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { MiniChart, SectionHeader, SeverityBadge } from "../../shared/components/Visuals";
 import { findByIdOrFirst } from "../../shared/lib/collection";
+import { LIVE_REFETCH_MS, queryKeys } from "../../shared/lib/query";
 import { useAsyncAction } from "../../shared/lib/use-async-action";
 import { useLanguage } from "../../shared/lib/use-language";
 import {
@@ -10,7 +11,30 @@ import {
   listSecurityEvents,
   markSecurityEventReviewed,
   updateIncidentStatus,
+  type Incident,
 } from "./api";
+
+// The severity chart has no historical series to draw from, so each incident contributes a
+// height derived from its severity, nudged per position so equal severities stay readable.
+const SEVERITY_CHART_HEIGHT: Record<string, number> = {
+  critical: 90,
+  high: 70,
+  medium: 48,
+  low: 25,
+  info: 15,
+};
+const UNKNOWN_SEVERITY_CHART_HEIGHT = 20;
+const SEVERITY_CHART_LIMIT = 12;
+
+function toSeverityChartValues(incidents: Incident[]) {
+  return incidents
+    .slice(0, SEVERITY_CHART_LIMIT)
+    .map(
+      (incident, index) =>
+        (SEVERITY_CHART_HEIGHT[incident.severity] ?? UNKNOWN_SEVERITY_CHART_HEIGHT) +
+        (index % 3) * 5,
+    );
+}
 
 export function SecurityEventsPage() {
   const { language } = useLanguage();
@@ -23,34 +47,34 @@ export function SecurityEventsPage() {
     ko ? "Incident를 갱신할 수 없습니다." : "The incident could not be updated.",
   );
   const events = useQuery({
-    queryKey: ["security-events"],
+    queryKey: queryKeys.securityEvents,
     queryFn: listSecurityEvents,
-    refetchInterval: 2000,
+    refetchInterval: LIVE_REFETCH_MS,
   });
   const incidents = useQuery({
-    queryKey: ["incidents", severity, status],
+    queryKey: queryKeys.filteredIncidents(severity, status),
     queryFn: () => listIncidents(severity, status),
-    refetchInterval: 2000,
+    refetchInterval: LIVE_REFETCH_MS,
   });
   // A resolved or filtered-out selection should not strand the detail panel.
   const active = findByIdOrFirst(incidents.data, selected);
   const timeline = useQuery({
-    queryKey: ["incident-timeline", active?.id],
+    queryKey: queryKeys.incidentTimeline(active?.id),
     queryFn: () => getIncidentTimeline(active?.id ?? 0),
     enabled: active !== undefined,
-    refetchInterval: 2000,
+    refetchInterval: LIVE_REFETCH_MS,
   });
   const review = (id: number) =>
     run(
       id,
       () => markSecurityEventReviewed(id),
-      () => client.invalidateQueries({ queryKey: ["security-events"] }),
+      () => client.invalidateQueries({ queryKey: queryKeys.securityEvents }),
     );
   const setIncidentStatus = (id: number, nextStatus: "investigating" | "resolved") =>
     run(
       id,
       () => updateIncidentStatus(id, nextStatus),
-      () => client.invalidateQueries({ queryKey: ["incidents"] }),
+      () => client.invalidateQueries({ queryKey: queryKeys.incidents }),
     );
   return (
     <section>
@@ -77,14 +101,7 @@ export function SecurityEventsPage() {
             <MiniChart
               label={ko ? "Incident 심각도 분포" : "Incident severity distribution"}
               tone="red"
-              values={(incidents.data ?? [])
-                .slice(0, 12)
-                .map(
-                  (x, i) =>
-                    (({ critical: 90, high: 70, medium: 48, low: 25, info: 15 })[x.severity] ??
-                      20) +
-                    (i % 3) * 5,
-                )}
+              values={toSeverityChartValues(incidents.data ?? [])}
             />
           </div>
         </article>
@@ -203,7 +220,9 @@ export function SecurityEventsPage() {
           <article className="card panel">
             <div className="panel-title">
               <h2>{ko ? "조사 타임라인" : "Investigation timeline"}</h2>
-              <span>{timeline.data?.length ?? 0} {ko ? "개 근거" : "EVIDENCE"}</span>
+              <span>
+                {timeline.data?.length ?? 0} {ko ? "개 근거" : "EVIDENCE"}
+              </span>
             </div>
             {timeline.isPending ? (
               <p className="empty">{ko ? "근거를 불러오는 중…" : "Loading evidence…"}</p>
@@ -241,7 +260,9 @@ export function SecurityEventsPage() {
               </ol>
             ) : (
               <p className="empty">
-                {ko ? "이 Incident에 연결된 탐지 근거가 없습니다." : "No detection evidence is linked to this incident."}
+                {ko
+                  ? "이 Incident에 연결된 탐지 근거가 없습니다."
+                  : "No detection evidence is linked to this incident."}
               </p>
             )}
           </article>

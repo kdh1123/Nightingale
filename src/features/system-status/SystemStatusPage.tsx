@@ -2,22 +2,25 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { StatePanel } from "../../shared/components/StatePanel";
 import { Gauge, SectionHeader } from "../../shared/components/Visuals";
+import { formatGibibytes, formatMebibytes } from "../../shared/lib/format";
+import { LIVE_REFETCH_MS, queryKeys } from "../../shared/lib/query";
 import { useLanguage } from "../../shared/lib/use-language";
 import { getSystemSnapshot, listProcesses } from "./api";
+import { estimateNetworkLoadPercent } from "./metrics";
 export function SystemStatusPage() {
   const { language } = useLanguage();
   const ko = language === "ko";
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("cpu");
   const snapshot = useQuery({
-    queryKey: ["snapshot"],
+    queryKey: queryKeys.systemSnapshot,
     queryFn: getSystemSnapshot,
-    refetchInterval: 2000,
+    refetchInterval: LIVE_REFETCH_MS,
   });
   const processes = useQuery({
-    queryKey: ["processes", query, sort],
+    queryKey: queryKeys.processes(query, sort),
     queryFn: () => listProcesses(query, sort),
-    refetchInterval: 2000,
+    refetchInterval: LIVE_REFETCH_MS,
   });
   if (snapshot.isPending)
     return (
@@ -27,14 +30,14 @@ export function SystemStatusPage() {
     return (
       <StatePanel title="시스템 상태를 불러올 수 없습니다">잠시 후 다시 시도하세요.</StatePanel>
     );
-  const value = snapshot.data;
+  const system = snapshot.data;
   const usage = [
-    { label: "CPU", value: value.cpuPercent, tone: "blue" as const },
-    { label: ko ? "메모리" : "Memory", value: value.memory.percent, tone: "mint" as const },
-    { label: ko ? "디스크" : "Disk", value: value.disk.percent, tone: "amber" as const },
+    { label: "CPU", value: system.cpuPercent, tone: "blue" as const },
+    { label: ko ? "메모리" : "Memory", value: system.memory.percent, tone: "mint" as const },
+    { label: ko ? "디스크" : "Disk", value: system.disk.percent, tone: "amber" as const },
     {
       label: ko ? "네트워크" : "Network",
-      value: Math.min(100, value.cpuPercent * 0.55 + 8),
+      value: estimateNetworkLoadPercent(system.cpuPercent),
       tone: "blue" as const,
     },
   ];
@@ -53,7 +56,7 @@ export function SystemStatusPage() {
             <div className="panel-title">
               <h2>{ko ? "시스템 요약" : "System summary"}</h2>
               <span>
-                {value.operatingSystem} {value.operatingSystemVersion ?? ""}
+                {system.operatingSystem} {system.operatingSystemVersion ?? ""}
               </span>
             </div>
             <div className="gauge-row">
@@ -67,7 +70,7 @@ export function SystemStatusPage() {
               <h2>{ko ? "상위 프로세스" : "Top processes"}</h2>
               <span>
                 {ko ? "갱신" : "UPDATED"}{" "}
-                {new Date(value.collectedAtUnix * 1000).toLocaleTimeString()}
+                {new Date(system.collectedAtUnix * 1000).toLocaleTimeString()}
               </span>
             </div>
             <div className="filters">
@@ -101,7 +104,7 @@ export function SystemStatusPage() {
                       <i style={{ width: `${Math.min(100, item.cpuPercent)}%` }} />
                     </div>
                     <span>{item.cpuPercent.toFixed(1)}%</span>
-                    <span>{(item.memoryBytes / 1024 / 1024).toFixed(0)} MB</span>
+                    <span>{formatMebibytes(item.memoryBytes)}</span>
                   </div>
                 ))}
               </div>
@@ -114,20 +117,20 @@ export function SystemStatusPage() {
             <div className="detail-key">
               <span>{ko ? "프로세서" : "Processor"}</span>
               <strong>
-                {value.logicalCpuCount} {ko ? "논리 코어" : "logical cores"}
+                {system.logicalCpuCount} {ko ? "논리 코어" : "logical cores"}
               </strong>
             </div>
             <div className="detail-key">
               <span>{ko ? "운영 체제" : "Operating system"}</span>
-              <strong>{value.operatingSystem}</strong>
+              <strong>{system.operatingSystem}</strong>
             </div>
             <div className="detail-key">
               <span>{ko ? "사용 중인 메모리" : "Memory in use"}</span>
-              <strong>{(value.memory.usedBytes / 1024 / 1024 / 1024).toFixed(1)} GB</strong>
+              <strong>{formatGibibytes(system.memory.usedBytes)}</strong>
             </div>
             <div className="detail-key">
               <span>{ko ? "사용 중인 디스크" : "Disk in use"}</span>
-              <strong>{(value.disk.usedBytes / 1024 / 1024 / 1024).toFixed(1)} GB</strong>
+              <strong>{formatGibibytes(system.disk.usedBytes)}</strong>
             </div>
           </article>
         </div>

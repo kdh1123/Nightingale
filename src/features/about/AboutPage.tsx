@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { StatePanel } from "../../shared/components/StatePanel";
+import { queryKeys } from "../../shared/lib/query";
 import { getAppStatus } from "../../shared/lib/tauri";
 
 export function AboutPage() {
-  const status = useQuery({ queryKey: ["app-status"], queryFn: getAppStatus, retry: false });
+  const status = useQuery({ queryKey: queryKeys.appStatus, queryFn: getAppStatus, retry: false });
   if (status.isPending)
     return <StatePanel title="Nightingale 정보">제품 정보를 불러오는 중입니다.</StatePanel>;
   if (status.isError)

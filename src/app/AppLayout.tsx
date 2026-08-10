@@ -3,11 +3,11 @@ import { LanguageProvider } from "../shared/lib/language";
 import { useLanguage } from "../shared/lib/use-language";
 
 const navigation = [
-  { to: "/", ko: "대시보드", en: "Dashboard", icon: "◈" },
-  { to: "/system", ko: "시스템", en: "System", icon: "▦" },
-  { to: "/monitoring", ko: "모니터링", en: "Monitoring", icon: "◉" },
-  { to: "/events", ko: "위협 탐지", en: "Threats", icon: "◇" },
-  { to: "/policy", ko: "리포트 및 설정", en: "Reports & Settings", icon: "▤" },
+  { to: "/", labelKo: "대시보드", labelEn: "Dashboard", icon: "◈" },
+  { to: "/system", labelKo: "시스템", labelEn: "System", icon: "▦" },
+  { to: "/monitoring", labelKo: "모니터링", labelEn: "Monitoring", icon: "◉" },
+  { to: "/events", labelKo: "위협 탐지", labelEn: "Threats", icon: "◇" },
+  { to: "/policy", labelKo: "리포트 및 설정", labelEn: "Reports & Settings", icon: "▤" },
 ];
 
 export function AppLayout() {
@@ -30,10 +30,10 @@ function AppFrame() {
           </div>
         </div>
         <nav aria-label={ko ? "주 메뉴" : "Main menu"}>
-          {navigation.map(({ to, ko: korean, en, icon }) => (
+          {navigation.map(({ to, labelKo, labelEn, icon }) => (
             <NavLink key={to} to={to} end={to === "/"}>
               <span aria-hidden="true">{icon}</span>
-              {ko ? korean : en}
+              {ko ? labelKo : labelEn}
             </NavLink>
           ))}
         </nav>

@@ -7,30 +7,53 @@ import {
   SectionHeader,
   SeverityBadge,
 } from "../../shared/components/Visuals";
+import { formatMebibytes } from "../../shared/lib/format";
+import { BACKGROUND_REFETCH_MS, LIVE_REFETCH_MS, queryKeys } from "../../shared/lib/query";
 import { useLanguage } from "../../shared/lib/use-language";
 import { getAppStatus } from "../../shared/lib/tauri";
 import { getSecurityReport } from "../security-management/api";
-import { getSystemSnapshot, listProcesses, terminateProcess } from "../system-status/api";
+import {
+  getSystemSnapshot,
+  listProcesses,
+  terminateProcess,
+  type ProcessSummary,
+} from "../system-status/api";
+import { estimateNetworkLoadPercent } from "../system-status/metrics";
+
+// A process only shows up in the resource alert list when it is clearly outside normal use.
+const RESOURCE_ALERT_CPU_PERCENT = 15;
+const RESOURCE_ALERT_MEMORY_BYTES = 1024 * 1024 * 1024;
+const RESOURCE_ALERT_LIMIT = 3;
+
+function selectResourceHogs(processes: ProcessSummary[]) {
+  return processes
+    .filter(
+      (process) =>
+        process.cpuPercent >= RESOURCE_ALERT_CPU_PERCENT ||
+        process.memoryBytes >= RESOURCE_ALERT_MEMORY_BYTES,
+    )
+    .slice(0, RESOURCE_ALERT_LIMIT);
+}
 
 export function DashboardPage() {
   const { language } = useLanguage();
   const ko = language === "ko";
-  const status = useQuery({ queryKey: ["app-status"], queryFn: getAppStatus, retry: false });
+  const status = useQuery({ queryKey: queryKeys.appStatus, queryFn: getAppStatus, retry: false });
   const report = useQuery({
-    queryKey: ["security-report"],
+    queryKey: queryKeys.securityReport,
     queryFn: getSecurityReport,
     retry: false,
-    refetchInterval: 5000,
+    refetchInterval: BACKGROUND_REFETCH_MS,
   });
   const system = useQuery({
-    queryKey: ["snapshot"],
+    queryKey: queryKeys.systemSnapshot,
     queryFn: getSystemSnapshot,
-    refetchInterval: 2000,
+    refetchInterval: LIVE_REFETCH_MS,
   });
   const processes = useQuery({
-    queryKey: ["processes", "resource-alerts"],
+    queryKey: queryKeys.resourceAlertProcesses,
     queryFn: () => listProcesses(undefined, "cpu"),
-    refetchInterval: 5000,
+    refetchInterval: BACKGROUND_REFETCH_MS,
   });
   if (status.isPending)
     return (
@@ -46,9 +69,15 @@ export function DashboardPage() {
   const incidents = report.data?.securityScore.openIncidentCount ?? 0;
   const cpu = system.data?.cpuPercent ?? 0;
   const memory = system.data?.memory.percent ?? 0;
-  const resourceHogs = (processes.data ?? [])
-    .filter((process) => process.cpuPercent >= 15 || process.memoryBytes >= 1024 * 1024 * 1024)
-    .slice(0, 3);
+  const resourceHogs = selectResourceHogs(processes.data ?? []);
+  const requestTermination = (process: ProcessSummary) => {
+    const confirmed = window.confirm(
+      ko
+        ? `${process.name}을(를) 종료할까요? 저장하지 않은 작업이 손실될 수 있습니다.`
+        : `Close ${process.name}? Unsaved work may be lost.`,
+    );
+    if (confirmed) void terminateProcess(process.pid).then(() => processes.refetch());
+  };
   return (
     <section>
       <SectionHeader
@@ -140,7 +169,7 @@ export function DashboardPage() {
               />
               <Gauge
                 label={ko ? "네트워크" : "Network"}
-                value={Math.min(100, cpu * 0.55 + 8)}
+                value={estimateNetworkLoadPercent(cpu)}
                 tone="blue"
               />
             </div>
@@ -195,22 +224,10 @@ export function DashboardPage() {
                     <strong>{process.name}</strong>
                     <small>
                       PID {process.pid} · CPU {process.cpuPercent.toFixed(1)}% ·{" "}
-                      {(process.memoryBytes / 1024 / 1024).toFixed(0)} MB
+                      {formatMebibytes(process.memoryBytes)}
                     </small>
                   </div>
-                  <button
-                    className="btn danger"
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          ko
-                            ? `${process.name}을(를) 종료할까요? 저장하지 않은 작업이 손실될 수 있습니다.`
-                            : `Close ${process.name}? Unsaved work may be lost.`,
-                        )
-                      )
-                        void terminateProcess(process.pid).then(() => processes.refetch());
-                    }}
-                  >
+                  <button className="btn danger" onClick={() => requestTermination(process)}>
                     {ko ? "앱 종료 제안" : "Close app"}
                   </button>
                 </div>

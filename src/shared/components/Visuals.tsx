@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+export type ChartTone = "mint" | "blue" | "amber" | "red";
+
 export function Gauge({
   value,
   label,
@@ -9,7 +11,7 @@ export function Gauge({
   value: number;
   label: string;
   detail?: string;
-  tone?: "mint" | "blue" | "amber" | "red";
+  tone?: ChartTone;
 }) {
   const safe = Math.max(0, Math.min(100, value));
   return (
@@ -43,7 +45,7 @@ export function MiniChart({
   label,
 }: {
   values: number[];
-  tone?: "mint" | "blue" | "amber" | "red";
+  tone?: ChartTone;
   label: string;
 }) {
   const max = Math.max(...values, 1);
