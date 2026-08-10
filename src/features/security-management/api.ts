@@ -77,7 +77,10 @@ export const getDetectionPolicy = () => invoke<DetectionPolicy>("get_detection_p
 export const updateDetectionPolicy = (policy: DetectionPolicy) =>
   invoke<DetectionPolicy>("update_detection_policy", { policy });
 export const listAllowlistEntries = () => invoke<AllowlistEntry[]>("list_allowlist_entries");
-export const addAllowlistEntry = (entryType: AllowlistEntry["entryType"], value: string, expiresInDays: number | null) =>
-  invoke<AllowlistEntry>("add_allowlist_entry", { entryType, value, expiresInDays });
+export const addAllowlistEntry = (
+  entryType: AllowlistEntry["entryType"],
+  value: string,
+  expiresInDays: number | null,
+) => invoke<AllowlistEntry>("add_allowlist_entry", { entryType, value, expiresInDays });
 export const removeAllowlistEntry = (id: number) => invoke<void>("remove_allowlist_entry", { id });
 export const listAllowlistAudit = () => invoke<AllowlistAuditEntry[]>("list_allowlist_audit");

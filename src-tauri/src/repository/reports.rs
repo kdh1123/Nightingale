@@ -2,11 +2,19 @@
 
 use super::models::{SecurityReport, SeverityCounts};
 use super::open_connection;
-use super::security_events::{list_security_events, security_score};
-use rusqlite::params;
+use super::security_events::{
+    list_security_events_from_connection, security_score_from_connection,
+};
+use rusqlite::{params, Connection};
 
 pub fn security_report(database_path: &std::path::Path) -> Result<SecurityReport, String> {
     let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    security_report_from_connection(&connection)
+}
+
+/// Building a report needs a dozen queries, so it takes a connection instead of a path and
+/// every caller reuses the one it already has.
+fn security_report_from_connection(connection: &Connection) -> Result<SecurityReport, String> {
     let count = |sql: &str| {
         connection
             .query_row(sql, [], |row| row.get::<_, i64>(0))
@@ -19,7 +27,7 @@ pub fn security_report(database_path: &std::path::Path) -> Result<SecurityReport
         high: count("SELECT count(*) FROM security_events WHERE severity = 'high'")?,
         critical: count("SELECT count(*) FROM security_events WHERE severity = 'critical'")?,
     };
-    let recent_detections = list_security_events(database_path)?;
+    let recent_detections = list_security_events_from_connection(connection)?;
     let recent_risk_events = recent_detections
         .iter()
         .filter(|event| ["medium", "high", "critical"].contains(&event.severity.as_str()))
@@ -31,7 +39,7 @@ pub fn security_report(database_path: &std::path::Path) -> Result<SecurityReport
         .map_err(|error| error.to_string())?;
     let report = SecurityReport {
         generated_at,
-        security_score: security_score(database_path)?,
+        security_score: security_score_from_connection(connection)?,
         total_incidents: count("SELECT count(*) FROM incidents")?,
         severity_counts,
         monitored_folder_count: count("SELECT count(*) FROM monitored_paths WHERE enabled = 1")?,
@@ -43,8 +51,8 @@ pub fn security_report(database_path: &std::path::Path) -> Result<SecurityReport
 }
 
 pub fn save_security_report(database_path: &std::path::Path) -> Result<SecurityReport, String> {
-    let report = security_report(database_path)?;
     let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    let report = security_report_from_connection(&connection)?;
     connection
         .execute(
             "INSERT INTO report_history (report_json) VALUES (?1)",

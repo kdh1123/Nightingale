@@ -4,7 +4,7 @@
 use super::models::{Incident, IncidentTimelineEvent, SecurityEvent, SecurityScore};
 use super::open_connection;
 use crate::domain::threat_detection::{Severity, ThreatAssessment, CORRELATION_WINDOW_SECONDS};
-use rusqlite::params;
+use rusqlite::{params, Connection};
 
 /// Writes one assessment and folds it into an open incident when a matching correlation key
 /// was seen inside the correlation window; otherwise a new incident is opened.
@@ -50,6 +50,13 @@ pub fn persist_threat_assessment(
 
 pub fn list_security_events(database_path: &std::path::Path) -> Result<Vec<SecurityEvent>, String> {
     let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    list_security_events_from_connection(&connection)
+}
+
+/// Shared with the report builder so one report does not open several connections.
+pub(super) fn list_security_events_from_connection(
+    connection: &Connection,
+) -> Result<Vec<SecurityEvent>, String> {
     let mut statement = connection.prepare("SELECT id, event_type, severity, title, description, occurred_at, reviewed FROM security_events ORDER BY occurred_at DESC LIMIT 100").map_err(|error| error.to_string())?;
     let result = statement
         .query_map([], |row| {
@@ -155,6 +162,12 @@ pub fn incident_timeline(
 
 pub fn security_score(database_path: &std::path::Path) -> Result<SecurityScore, String> {
     let connection = open_connection(database_path).map_err(|error| error.to_string())?;
+    security_score_from_connection(&connection)
+}
+
+pub(super) fn security_score_from_connection(
+    connection: &Connection,
+) -> Result<SecurityScore, String> {
     let mut statement = connection.prepare("SELECT severity FROM incidents WHERE status != 'resolved' AND last_detected_at >= datetime('now', '-7 days')").map_err(|error| error.to_string())?;
     let severities = statement
         .query_map([], |row| row.get::<_, String>(0))
